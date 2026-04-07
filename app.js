@@ -18,13 +18,12 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'health-diary-app';
 
-// 뷰 매핑
 const views = {
     auth: document.getElementById('auth-section'),
     header: document.getElementById('user-header'),
     dashboard: document.getElementById('dashboard-view'),
     calendar: document.getElementById('calendar-view'),
-    alarm: document.getElementById('alarm-view'), // 추가됨
+    alarm: document.getElementById('alarm-view'),
     desktopNav: document.getElementById('desktop-sidebar'),
     mobileNav: document.getElementById('bottom-nav')
 };
@@ -41,10 +40,53 @@ const showMsg = (msg, type = 'info') => {
     setTimeout(() => msgBox.classList.add('hidden'), 3000);
 };
 
-// --- 상태 변수 ---
+// --- [추가됨] 알람 효과음 객체 생성 ---
+// Mixkit의 무료 알람 효과음을 사용합니다.
+const alarmAudio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+alarmAudio.loop = true; // 유저가 끌 때까지 무한 반복
+
+// --- [추가됨] 건강 뉴스 실시간 가져오기 로직 ---
+const fetchHealthNews = async () => {
+    const container = document.getElementById('health-news-container');
+    try {
+        // 구글 뉴스 RSS (키워드: 건강 OR 다이어트) -> rss2json API를 통해 JSON으로 변환
+        const rssUrl = encodeURIComponent('https://news.google.com/rss/search?q=건강+OR+다이어트&hl=ko&gl=KR&ceid=KR:ko');
+        const response = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`);
+        const data = await response.json();
+
+        if (data.status === 'ok') {
+            container.innerHTML = ''; // 로딩 아이콘 제거
+            // 최신 기사 4개만 추출
+            const articles = data.items.slice(0, 4);
+            
+            articles.forEach(article => {
+                // 날짜 포맷팅 (예: 4월 7일)
+                const date = new Date(article.pubDate).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+                // HTML 동적 생성
+                container.innerHTML += `
+                    <a href="${article.link}" target="_blank" class="bg-white/60 p-4 rounded-2xl flex flex-col gap-2 hover:bg-white/90 transition shadow-sm cursor-pointer block border border-transparent hover:border-blue-200">
+                        <p class="font-bold text-slate-800 text-sm leading-snug line-clamp-2" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">
+                            ${article.title}
+                        </p>
+                        <div class="flex justify-between items-center mt-1">
+                            <span class="text-xs font-semibold text-blue-500">${article.source || '건강 리포트'}</span>
+                            <span class="text-xs text-slate-400">${date}</span>
+                        </div>
+                    </a>
+                `;
+            });
+        } else {
+            throw new Error("RSS 변환 실패");
+        }
+    } catch (error) {
+        console.error("뉴스 로딩 에러:", error);
+        container.innerHTML = `<div class="text-center text-sm text-slate-400 py-4">최신 뉴스를 불러오지 못했습니다.</div>`;
+    }
+};
+
 let currentUser = null;
 let unsubscribeRecords = null;
-let unsubscribeAlarms = null; // 알람 감지기
+let unsubscribeAlarms = null;
 
 document.getElementById('login-btn').addEventListener('click', () => {
     const e = document.getElementById('email-input').value;
@@ -70,17 +112,22 @@ onAuthStateChanged(auth, (user) => {
         views.desktopNav.classList.remove('hidden'); views.desktopNav.classList.add('md:flex');
         views.mobileNav.classList.remove('hidden'); views.mobileNav.classList.add('flex');
         
-        switchTab('dashboard'); // 기본 화면 대시보드
+        switchTab('dashboard'); 
         document.getElementById('user-greeting').innerText = `${user.email.split('@')[0]}님`;
         
+        // 데이터 불러오기 시작
         fetchMyRecords(user.uid);
-        fetchMyAlarms(user.uid); // 알람 가져오기 시작
-        startAlarmChecker();     // 알람 시간 감지 시작!
+        fetchMyAlarms(user.uid);
+        startAlarmChecker();
+        
+        // [추가] 로그인 성공 시 구글 건강 뉴스 불러오기
+        fetchHealthNews();
+        
     } else {
         currentUser = null;
         if (unsubscribeRecords) unsubscribeRecords();
         if (unsubscribeAlarms) unsubscribeAlarms();
-        stopAlarmChecker();      // 로그아웃 시 알람 감지 중지
+        stopAlarmChecker();
         
         myRecords = {};
         myAlarms = [];
@@ -95,14 +142,11 @@ onAuthStateChanged(auth, (user) => {
     }
 });
 
-// --- 네비게이션 탭 스위칭 ---
 const switchTab = (tabName) => {
-    // 뷰 보이기/숨기기
     views.dashboard.classList.toggle('hidden', tabName !== 'dashboard');
     views.calendar.classList.toggle('hidden', tabName !== 'calendar');
     views.alarm.classList.toggle('hidden', tabName !== 'alarm');
     
-    // 버튼 스타일 초기화 함수
     const setBtnStyle = (id, isActive, isMobile = false) => {
         const btn = document.getElementById(id);
         if(!btn) return;
@@ -132,9 +176,8 @@ document.getElementById('shortcut-calendar-btn').addEventListener('click', () =>
 document.getElementById('nav-alarm').addEventListener('click', () => switchTab('alarm'));
 document.getElementById('mobile-nav-alarm').addEventListener('click', () => switchTab('alarm'));
 
-// ==========================================
+
 // 1. 기존 캘린더 로직 (동일)
-// ==========================================
 let currentDate = new Date();
 let myRecords = {};
 
@@ -261,35 +304,26 @@ document.getElementById('save-record-btn').addEventListener('click', async () =>
     } catch (error) { showMsg("오류가 발생했습니다.", "error"); }
 });
 
-// ==========================================
-// 2. 신규 알람 로직 (백그라운드 & UI)
-// ==========================================
+// 2. 알람 로직
 let myAlarms = []; 
 const addAlarmModal = document.getElementById('add-alarm-modal');
 const alarmTriggerModal = document.getElementById('alarm-trigger-modal');
 let alarmTimerId = null;
-let lastTriggeredTime = ""; // 같은 1분 내에 중복 알림 방지
+let lastTriggeredTime = "";
 
-// Firestore에서 알람 실시간 가져오기
 const fetchMyAlarms = (userId) => {
     const alarmsRef = collection(db, 'artifacts', appId, 'users', userId, 'alarms');
     unsubscribeAlarms = onSnapshot(alarmsRef, (snapshot) => {
         myAlarms = [];
-        snapshot.forEach((doc) => {
-            myAlarms.push({ id: doc.id, ...doc.data() });
-        });
-        
-        // 시간순 정렬
+        snapshot.forEach((doc) => { myAlarms.push({ id: doc.id, ...doc.data() }); });
         myAlarms.sort((a, b) => a.time.localeCompare(b.time));
         renderAlarmList();
     });
 };
 
-// 알람 리스트 HTML 그리기
 const renderAlarmList = () => {
     const listEl = document.getElementById('alarm-list');
     listEl.innerHTML = '';
-
     if(myAlarms.length === 0) {
         listEl.innerHTML = `<div class="text-center py-10 text-slate-400 flex flex-col items-center"><i data-lucide="bell-off" class="w-10 h-10 mb-2 opacity-50"></i><p>등록된 알림이 없습니다.</p></div>`;
     } else {
@@ -301,15 +335,12 @@ const renderAlarmList = () => {
                     <div class="text-2xl font-black text-slate-800">${alarm.time}</div>
                     <div class="font-bold text-slate-600">${alarm.title}</div>
                 </div>
-                <button class="delete-alarm-btn text-slate-400 hover:text-red-500 p-2 transition" data-id="${alarm.id}">
-                    <i data-lucide="trash-2" class="w-5 h-5 pointer-events-none"></i>
-                </button>
+                <button class="delete-alarm-btn text-slate-400 hover:text-red-500 p-2 transition" data-id="${alarm.id}"><i data-lucide="trash-2" class="w-5 h-5 pointer-events-none"></i></button>
             `;
             listEl.appendChild(item);
         });
     }
 
-    // 삭제 버튼 이벤트 연결
     document.querySelectorAll('.delete-alarm-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const alarmId = e.target.getAttribute('data-id');
@@ -319,69 +350,52 @@ const renderAlarmList = () => {
             }
         });
     });
-    
     if(window.lucide) window.lucide.createIcons();
 };
 
-// 알람 추가 모달 열기/닫기
 document.getElementById('open-add-alarm-btn').addEventListener('click', () => {
-    document.getElementById('alarm-time-input').value = "09:00"; // 기본값
+    document.getElementById('alarm-time-input').value = "09:00";
     document.getElementById('alarm-title-input').value = "";
     addAlarmModal.classList.remove('hidden');
 });
 document.getElementById('close-alarm-modal-btn').addEventListener('click', () => addAlarmModal.classList.add('hidden'));
 
-// 알람 DB에 저장
 document.getElementById('save-alarm-btn').addEventListener('click', async () => {
-    const time = document.getElementById('alarm-time-input').value; // 형식: "09:00"
+    const time = document.getElementById('alarm-time-input').value;
     const title = document.getElementById('alarm-title-input').value.trim();
-
     if(!time || !title) return showMsg("시간과 알림 이름을 모두 입력해주세요.", "error");
 
-    // 랜덤 ID로 저장 (같은 시간에 여러 알람이 있을 수 있으므로)
     const newAlarmId = crypto.randomUUID();
-    
     try {
         await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'alarms', newAlarmId), {
-            time: time,
-            title: title,
-            createdAt: new Date().toISOString()
+            time: time, title: title, createdAt: new Date().toISOString()
         });
         showMsg("알림이 등록되었습니다!", "success");
         addAlarmModal.classList.add('hidden');
-    } catch(err) {
-        console.error(err);
-        showMsg("저장 실패", "error");
-    }
+    } catch(err) { showMsg("저장 실패", "error"); }
 });
 
-// --- 시간 감지기 (타이머) ---
 const startAlarmChecker = () => {
     if(alarmTimerId) clearInterval(alarmTimerId);
-    
-    // 10초마다 현재 시간을 확인합니다.
     alarmTimerId = setInterval(() => {
         if(!currentUser || myAlarms.length === 0) return;
         
         const now = new Date();
-        // 현재 시간을 "HH:MM" 형식으로 변환
         const currentHHMM = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
 
-        // 방금 울린 분(minute)이 아닐 때만 검사
         if(currentHHMM !== lastTriggeredTime) {
-            // 현재 시간과 일치하는 알람 찾기
             const matchingAlarm = myAlarms.find(a => a.time === currentHHMM);
-            
             if(matchingAlarm) {
-                // 알람 발견! 화면에 모달 띄우기
                 document.getElementById('alarm-trigger-title').innerText = matchingAlarm.title;
                 alarmTriggerModal.classList.remove('hidden');
-                
-                // 중복 실행을 막기 위해 마지막 실행 시간 기록
                 lastTriggeredTime = currentHHMM;
+                
+                // [추가] 팝업이 뜨면서 알람 소리 재생 시작!
+                alarmAudio.currentTime = 0; // 처음부터
+                alarmAudio.play().catch(e => console.log("오디오 자동재생 차단됨:", e));
             }
         }
-    }, 10000); // 10초(10000ms)
+    }, 10000);
 };
 
 const stopAlarmChecker = () => {
@@ -389,7 +403,8 @@ const stopAlarmChecker = () => {
     lastTriggeredTime = "";
 };
 
-// 알람 끄기 버튼 (모달 닫기)
+// [추가] 알람 끄기 버튼을 누르면 모달이 닫히고 소리도 꺼짐
 document.getElementById('dismiss-alarm-btn').addEventListener('click', () => {
     alarmTriggerModal.classList.add('hidden');
+    alarmAudio.pause(); // 음악 정지
 });
