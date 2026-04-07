@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// TODO: 파이어베이스 콘솔에서 발급받은 본인의 설정값으로 변경하세요!
+// TODO: 파이어베이스 설정값 변경 필수
 const firebaseConfig = {
   apiKey: "AIzaSyC4oCU2t4qhMKgx0b_T3ry7GnghSkHigdE",
   authDomain: "healthcalendar-56191.firebaseapp.com",
@@ -13,13 +13,11 @@ const firebaseConfig = {
   measurementId: "G-P5WF2BJ70W"
 };
 
-// Firebase 초기화
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'health-diary-app'; // DB 경로용 고정 ID
+const appId = 'health-diary-app';
 
-// DOM 요소 매핑
 const views = {
     auth: document.getElementById('auth-section'),
     header: document.getElementById('user-header'),
@@ -31,19 +29,16 @@ const views = {
 const msgBox = document.getElementById('message-box');
 const msgText = document.getElementById('message-text');
 
-// 알림 메시지 함수
 const showMsg = (msg, type = 'info') => {
     msgText.innerText = msg;
     msgBox.className = 'absolute top-4 left-1/2 transform -translate-x-1/2 z-50 p-4 text-sm rounded-2xl shadow-lg backdrop-blur-md animate-fade-in transition-all w-11/12 max-w-md text-center bg-white border';
     if (type === 'error') msgBox.classList.add('bg-red-500/90', 'text-white', 'border-red-400');
     else if (type === 'success') msgBox.classList.add('bg-emerald-500/90', 'text-white', 'border-emerald-400');
     else msgBox.classList.add('bg-blue-600/90', 'text-white', 'border-blue-400');
-    
     msgBox.classList.remove('hidden');
     setTimeout(() => msgBox.classList.add('hidden'), 3000);
 };
 
-// --- 인증(Auth) 로직 ---
 let currentUser = null;
 let unsubscribeRecords = null;
 
@@ -51,7 +46,7 @@ document.getElementById('login-btn').addEventListener('click', () => {
     const e = document.getElementById('email-input').value;
     const p = document.getElementById('password-input').value;
     if(!e || !p) return showMsg("정보를 입력해주세요.", "error");
-    signInWithEmailAndPassword(auth, e, p).then(() => showMsg("로그인 성공!", "success")).catch(() => showMsg("로그인 실패. 이메일과 비밀번호를 확인하세요.", "error"));
+    signInWithEmailAndPassword(auth, e, p).then(() => showMsg("로그인 성공!", "success")).catch(() => showMsg("로그인 실패", "error"));
 });
 
 document.getElementById('signup-btn').addEventListener('click', () => {
@@ -63,51 +58,46 @@ document.getElementById('signup-btn').addEventListener('click', () => {
 
 document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
 
-// 인증 상태 감지 (로그인/로그아웃 시 화면 전환)
 onAuthStateChanged(auth, (user) => {
     if (user) {
         currentUser = user;
-        // 로그인 성공 화면 전환
         views.auth.classList.add('hidden');
         views.header.classList.remove('hidden');
         views.desktopNav.classList.remove('hidden'); views.desktopNav.classList.add('md:flex');
         views.mobileNav.classList.remove('hidden'); views.mobileNav.classList.add('flex');
-        switchTab('dashboard');
-        
+        switchTab('calendar'); // 로그인 시 바로 캘린더를 보여주도록 변경!
         document.getElementById('user-greeting').innerText = `${user.email.split('@')[0]}님`;
-        
-        // 내 데이터 불러오기 시작
         fetchMyRecords(user.uid);
     } else {
         currentUser = null;
-        if (unsubscribeRecords) unsubscribeRecords(); // 리스너 해제
         
-        // 로그아웃 화면 전환
+        // 데이터 감지 리스너 해제 및 완전 초기화
+        if (unsubscribeRecords) {
+            unsubscribeRecords();
+            unsubscribeRecords = null;
+        }
+        // [핵심 추가] 이전 유저의 로컬 데이터 객체를 완벽히 비워줍니다.
+        myRecords = {};
+
         views.auth.classList.remove('hidden');
         views.header.classList.add('hidden');
         views.dashboard.classList.add('hidden');
         views.calendar.classList.add('hidden');
         views.desktopNav.classList.add('hidden'); views.desktopNav.classList.remove('md:flex');
         views.mobileNav.classList.add('hidden'); views.mobileNav.classList.remove('flex');
-        document.getElementById('email-input').value = '';
-        document.getElementById('password-input').value = '';
     }
 });
 
-// --- 네비게이션 탭 스위칭 로직 ---
 const switchTab = (tabName) => {
     const isDash = tabName === 'dashboard';
     views.dashboard.classList.toggle('hidden', !isDash);
     views.calendar.classList.toggle('hidden', isDash);
     
-    // 메뉴 색상 활성화 상태 변경
-    const dHome = document.getElementById('nav-home');
-    const dCal = document.getElementById('nav-calendar');
+    const dHome = document.getElementById('nav-home'), dCal = document.getElementById('nav-calendar');
     dHome.className = isDash ? "w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold transition" : "w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-white/50 hover:text-slate-800 rounded-xl font-medium transition";
     dCal.className = !isDash ? "w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold transition" : "w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-white/50 hover:text-slate-800 rounded-xl font-medium transition";
 
-    const mHome = document.getElementById('mobile-nav-home');
-    const mCal = document.getElementById('mobile-nav-calendar');
+    const mHome = document.getElementById('mobile-nav-home'), mCal = document.getElementById('mobile-nav-calendar');
     mHome.className = isDash ? "flex flex-col items-center gap-1 text-blue-600" : "flex flex-col items-center gap-1 text-slate-400";
     mCal.className = !isDash ? "flex flex-col items-center gap-1 text-blue-600" : "flex flex-col items-center gap-1 text-slate-400";
 
@@ -120,21 +110,16 @@ document.getElementById('nav-calendar').addEventListener('click', () => switchTa
 document.getElementById('mobile-nav-calendar').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
 
-// --- 캘린더 및 데이터 로직 ---
 let currentDate = new Date();
-let myRecords = {}; // 예: { '2026-04-07': { bp: '120/80', water: 3, meds: true, notes: '' } }
+let myRecords = {};
 
 const fetchMyRecords = (userId) => {
     const recordsRef = collection(db, 'artifacts', appId, 'users', userId, 'healthRecords');
     unsubscribeRecords = onSnapshot(recordsRef, (snapshot) => {
         myRecords = {};
-        snapshot.forEach((doc) => {
-            myRecords[doc.id] = doc.data(); 
-        });
+        snapshot.forEach((doc) => { myRecords[doc.id] = doc.data(); });
         if(!views.calendar.classList.contains('hidden')) renderCalendar();
         updateDashboardSummary();
-    }, (error) => {
-        console.error("데이터 동기화 에러:", error);
     });
 };
 
@@ -164,6 +149,7 @@ const getLocalDateString = (d) => {
     return `${year}-${month}-${day}`;
 };
 
+// --- [변경됨] 캘린더 렌더링 (구글 태스크 스타일 텍스트 칩 적용) ---
 const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -185,25 +171,56 @@ const renderCalendar = () => {
     for (let i = 1; i <= lastDate; i++) {
         const cellDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const cell = document.createElement('div');
-        cell.className = "calendar-cell bg-white border border-slate-100 p-2 md:p-3 rounded-xl shadow-sm flex flex-col relative";
+        // 셀 높이를 키우고 넘치는 내용은 숨기도록 속성 부여
+        cell.className = "calendar-cell bg-white border border-slate-100 p-1 md:p-2 rounded-xl shadow-sm flex flex-col overflow-hidden";
         
         if (cellDateStr === todayStr) cell.classList.add('today-cell');
 
         const dateSpan = document.createElement('span');
-        dateSpan.className = "text-sm font-semibold text-slate-700 block mb-1";
+        dateSpan.className = "text-xs md:text-sm font-semibold text-slate-700 block mb-1 px-1";
+        // 일요일 빨간색 처리
+        const currentDayOfWeek = new Date(year, month, i).getDay();
+        if (currentDayOfWeek === 0) dateSpan.classList.add('text-red-500');
+        
         dateSpan.innerText = i;
         cell.appendChild(dateSpan);
 
+        // 데이터가 있을 경우 텍스트 라벨 추가
         if (myRecords[cellDateStr]) {
             const data = myRecords[cellDateStr];
-            const badgeContainer = document.createElement('div');
-            badgeContainer.className = "flex flex-wrap gap-1 mt-auto";
+            const recordsContainer = document.createElement('div');
+            recordsContainer.className = "flex flex-col gap-1 mt-1 w-full";
             
-            if (data.bp) badgeContainer.innerHTML += `<div class="w-4 h-4 rounded-full bg-rose-100 flex items-center justify-center"><i data-lucide="activity" class="w-3 h-3 text-rose-500"></i></div>`;
-            if (data.water > 0) badgeContainer.innerHTML += `<div class="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center"><i data-lucide="droplet" class="w-3 h-3 text-blue-500"></i></div>`;
-            if (data.meds) badgeContainer.innerHTML += `<div class="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center"><i data-lucide="pill" class="w-3 h-3 text-amber-500"></i></div>`;
+            // 혈압 칩 (빨간색)
+            if (data.bp) {
+                recordsContainer.innerHTML += `
+                    <div class="bg-rose-100 text-rose-700 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="혈압: ${data.bp}">
+                        <i data-lucide="activity" class="w-3 h-3 flex-shrink-0"></i> ${data.bp}
+                    </div>`;
+            }
+            // 수분 칩 (파란색)
+            if (data.water > 0) {
+                recordsContainer.innerHTML += `
+                    <div class="bg-blue-100 text-blue-700 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="수분: ${data.water}잔">
+                        <i data-lucide="droplet" class="w-3 h-3 flex-shrink-0"></i> ${data.water}잔
+                    </div>`;
+            }
+            // 약 복용 칩 (노란색)
+            if (data.meds) {
+                recordsContainer.innerHTML += `
+                    <div class="bg-amber-100 text-amber-700 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text">
+                        <i data-lucide="pill" class="w-3 h-3 flex-shrink-0"></i> 복용완료
+                    </div>`;
+            }
+            // 메모 칩 (회색) - 입력한 내용 앞부분만 보여줌
+            if (data.notes) {
+                recordsContainer.innerHTML += `
+                    <div class="bg-slate-100 text-slate-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.notes}">
+                        <i data-lucide="align-left" class="w-3 h-3 flex-shrink-0"></i> ${data.notes}
+                    </div>`;
+            }
             
-            cell.appendChild(badgeContainer);
+            cell.appendChild(recordsContainer);
         }
 
         cell.addEventListener('click', () => openRecordModal(cellDateStr, year, month + 1, i));
@@ -217,13 +234,12 @@ document.getElementById('prev-month').addEventListener('click', () => { currentD
 document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
 document.getElementById('today-month').addEventListener('click', () => { currentDate = new Date(); renderCalendar(); });
 
-// --- 데이터 입력 팝업(모달) 제어 ---
 const modal = document.getElementById('record-modal');
 let activeRecordDate = "";
 
 const openRecordModal = (dateStr, y, m, d) => {
     activeRecordDate = dateStr;
-    document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일 기록`;
+    document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일`;
     
     const data = myRecords[dateStr] || { bp: "", water: 0, meds: false, notes: "" };
     
@@ -245,16 +261,17 @@ document.getElementById('save-record-btn').addEventListener('click', async () =>
     const meds = document.getElementById('record-meds').checked;
     const notes = document.getElementById('record-notes').value.trim();
 
+    // 빈 값이면 DB에서 필드를 지우기 위해 처리 가능하지만, 우선은 덮어쓰기 형태로 유지합니다.
     const recordData = { bp, water, meds, notes, updatedAt: new Date().toISOString() };
 
     try {
         const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'healthRecords', activeRecordDate);
         await setDoc(docRef, recordData, { merge: true });
         
-        showMsg("성공적으로 저장되었습니다!", "success");
+        showMsg("저장되었습니다!", "success");
         modal.classList.add('hidden');
     } catch (error) {
         console.error("저장 실패:", error);
-        showMsg("저장 중 오류가 발생했습니다.", "error");
+        showMsg("오류가 발생했습니다.", "error");
     }
 });
