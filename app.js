@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 // TODO: 본인 파이어베이스 키로 변경하세요!
 const firebaseConfig = {
@@ -18,18 +18,29 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'health-diary-app';
 
+// 🌟 [새로 추가됨] 관리자 이메일 설정 (본인이 가입할 이메일 주소로 꼭 변경하세요!)
+const ADMIN_EMAIL = "asdf@asdf.com";
+
+// 🌟 [새로 추가됨] 고유 익명 닉네임 생성 함수 (유저 UID 기반 해싱 -> 항상 같은 번호 발급)
+const getUserNickname = (uid) => {
+    let hash = 0;
+    for (let i = 0; i < uid.length; i++) {
+        hash = uid.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const num = Math.abs(hash) % 10000;
+    return `ㅇㅇ(${String(num).padStart(4, '0')})`;
+};
+
 // 다크모드 제어
 const toggleDarkMode = () => {
     document.documentElement.classList.toggle('dark');
     const isDark = document.documentElement.classList.contains('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    
     document.querySelectorAll('.dark-icon').forEach(icon => icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon'));
     document.querySelectorAll('.dark-text').forEach(txt => txt.innerText = isDark ? '라이트 모드' : '다크 모드');
     if(window.lucide) window.lucide.createIcons();
     if(!views.dashboard.classList.contains('hidden')) renderChart();
 };
-
 document.getElementById('dark-mode-toggle').addEventListener('click', toggleDarkMode);
 document.getElementById('mobile-dark-mode-toggle').addEventListener('click', toggleDarkMode);
 
@@ -44,6 +55,7 @@ const views = {
     dashboard: document.getElementById('dashboard-view'),
     calendar: document.getElementById('calendar-view'),
     diary: document.getElementById('diary-view'),
+    community: document.getElementById('community-view'), // 커뮤니티 추가
     alarm: document.getElementById('alarm-view'),
     desktopNav: document.getElementById('desktop-sidebar'),
     mobileNav: document.getElementById('bottom-nav')
@@ -70,7 +82,6 @@ const fetchHealthNews = async () => {
         const rssUrl = encodeURIComponent('https://news.google.com/rss/search?q=건강+OR+다이어트&hl=ko&gl=KR&ceid=KR:ko');
         const response = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`);
         const data = await response.json();
-
         if (data.status === 'ok') {
             container.innerHTML = ''; 
             const articles = data.items.slice(0, 3);
@@ -90,8 +101,9 @@ const fetchHealthNews = async () => {
 
 let currentUser = null;
 let unsubscribeRecords = null;
+let unsubscribeDiaries = null;
 let unsubscribeAlarms = null;
-let unsubscribeDiaries = null; // [새로 추가] 일기 감지기
+let unsubscribeCommunity = null; // 커뮤니티 감지기
 
 document.getElementById('login-btn').addEventListener('click', () => {
     const e = document.getElementById('email-input').value;
@@ -118,23 +130,26 @@ onAuthStateChanged(auth, (user) => {
         document.getElementById('user-greeting').innerText = `${user.email.split('@')[0]}님`;
         
         fetchMyRecords(user.uid);
+        fetchMyDiaries(user.uid);
         fetchMyAlarms(user.uid);
-        fetchMyDiaries(user.uid); // [새로 추가] 일기 데이터 가져오기
+        fetchCommunityPosts(); // 로그인 시 커뮤니티 글 불러오기
         startAlarmChecker();
         fetchHealthNews();
     } else {
         currentUser = null;
         if (unsubscribeRecords) unsubscribeRecords();
-        if (unsubscribeAlarms) unsubscribeAlarms();
         if (unsubscribeDiaries) unsubscribeDiaries();
+        if (unsubscribeAlarms) unsubscribeAlarms();
+        if (unsubscribeCommunity) unsubscribeCommunity();
         stopAlarmChecker();
         
-        myRecords = {}; myAlarms = []; myDiaries = {};
+        myRecords = {}; myDiaries = {}; myAlarms = []; communityPosts = [];
         views.auth.classList.remove('hidden');
         views.header.classList.add('hidden');
         views.dashboard.classList.add('hidden');
         views.calendar.classList.add('hidden');
         views.diary.classList.add('hidden'); 
+        views.community.classList.add('hidden'); 
         views.alarm.classList.add('hidden');
         views.desktopNav.classList.add('hidden'); views.desktopNav.classList.remove('md:flex');
         views.mobileNav.classList.add('hidden'); views.mobileNav.classList.remove('flex');
@@ -145,13 +160,14 @@ const switchTab = (tabName) => {
     views.dashboard.classList.toggle('hidden', tabName !== 'dashboard');
     views.calendar.classList.toggle('hidden', tabName !== 'calendar');
     views.diary.classList.toggle('hidden', tabName !== 'diary'); 
+    views.community.classList.toggle('hidden', tabName !== 'community'); 
     views.alarm.classList.toggle('hidden', tabName !== 'alarm');
     
     const setBtnStyle = (id, isActive, isMobile = false) => {
         const btn = document.getElementById(id);
         if(!btn) return;
         if(isMobile) {
-            btn.className = isActive ? "flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400 w-1/5" : "flex flex-col items-center gap-1 text-slate-400 w-1/5";
+            btn.className = isActive ? "flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400 w-[16%]" : "flex flex-col items-center gap-1 text-slate-400 w-[16%]";
         } else {
             btn.className = isActive ? "w-full flex items-center gap-3 px-4 py-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-bold transition" : "w-full flex items-center gap-3 px-4 py-3 text-slate-500 dark:text-slate-400 hover:bg-white/50 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white rounded-xl font-medium transition";
         }
@@ -160,16 +176,19 @@ const switchTab = (tabName) => {
     setBtnStyle('nav-home', tabName === 'dashboard'); 
     setBtnStyle('nav-calendar', tabName === 'calendar'); 
     setBtnStyle('nav-diary', tabName === 'diary'); 
+    setBtnStyle('nav-community', tabName === 'community'); 
     setBtnStyle('nav-alarm', tabName === 'alarm');
     
     setBtnStyle('mobile-nav-home', tabName === 'dashboard', true); 
     setBtnStyle('mobile-nav-calendar', tabName === 'calendar', true); 
     setBtnStyle('mobile-nav-diary', tabName === 'diary', true); 
+    setBtnStyle('mobile-nav-community', tabName === 'community', true); 
     setBtnStyle('mobile-nav-alarm', tabName === 'alarm', true);
 
     if (tabName === 'calendar') renderCalendar();
     if (tabName === 'dashboard') renderChart();
     if (tabName === 'diary') renderFullDiaryList(); 
+    if (tabName === 'community') renderCommunityFeed(); 
 };
 
 document.getElementById('nav-home').addEventListener('click', () => switchTab('dashboard'));
@@ -178,25 +197,21 @@ document.getElementById('nav-calendar').addEventListener('click', () => switchTa
 document.getElementById('mobile-nav-calendar').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('nav-diary').addEventListener('click', () => switchTab('diary'));
 document.getElementById('mobile-nav-diary').addEventListener('click', () => switchTab('diary'));
+document.getElementById('nav-community').addEventListener('click', () => switchTab('community'));
+document.getElementById('mobile-nav-community').addEventListener('click', () => switchTab('community'));
 document.getElementById('nav-alarm').addEventListener('click', () => switchTab('alarm'));
 document.getElementById('mobile-nav-alarm').addEventListener('click', () => switchTab('alarm'));
 
-// 숏컷
 document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
-document.getElementById('shortcut-diary-btn').addEventListener('click', () => {
-    switchTab('diary');
-    document.getElementById('open-write-diary-btn').click();
-});
-
+document.getElementById('shortcut-diary-btn').addEventListener('click', () => { switchTab('diary'); document.getElementById('open-write-diary-btn').click(); });
 
 // ----------------------------------------------------
-// [수정됨] 건강 수치(캘린더) & 독립된 일기장 로직
+// 개인 기록 로직 (건강수치, 일기, 차트 등 기존과 동일)
 // ----------------------------------------------------
 let currentDate = new Date();
-let myRecords = {}; // 건강 기록 저장소 (healthRecords)
-let myDiaries = {}; // 일기 저장소 (diaries) - 완전히 분리!
+let myRecords = {}; 
+let myDiaries = {}; 
 
-// 1. 건강 수치 가져오기
 const fetchMyRecords = (userId) => {
     const recordsRef = collection(db, 'artifacts', appId, 'users', userId, 'healthRecords');
     unsubscribeRecords = onSnapshot(recordsRef, (snapshot) => {
@@ -208,7 +223,6 @@ const fetchMyRecords = (userId) => {
     });
 };
 
-// 2. 일기장 데이터만 따로 가져오기
 const fetchMyDiaries = (userId) => {
     const diariesRef = collection(db, 'artifacts', appId, 'users', userId, 'diaries');
     unsubscribeDiaries = onSnapshot(diariesRef, (snapshot) => {
@@ -223,35 +237,24 @@ const fetchMyDiaries = (userId) => {
 const hasData = (dateStr) => {
     const rec = myRecords[dateStr];
     const dia = myDiaries[dateStr];
-    const hasRec = rec && (rec.bp || rec.water > 0 || rec.steps > 0 || rec.meds || rec.notes);
-    const hasDia = dia && dia.content;
-    return hasRec || hasDia; // 건강기록이나 일기 중 하나라도 있으면 스트릭 인정
+    return (rec && (rec.bp || rec.water > 0 || rec.steps > 0 || rec.meds || rec.notes)) || (dia && dia.content);
 };
 
 const updateStreakUI = () => {
     const badgeEl = document.getElementById('streak-badge');
     const countEl = document.getElementById('streak-count');
     if(!badgeEl || !countEl) return;
-
-    let streak = 0;
-    let d = new Date();
+    let streak = 0; let d = new Date();
     let todayStr = getLocalDateString(d);
-    let yesterday = new Date(d);
-    yesterday.setDate(yesterday.getDate() - 1);
-    let yesterdayStr = getLocalDateString(yesterday);
-
-    if (!hasData(todayStr) && !hasData(yesterdayStr)) { badgeEl.classList.add('hidden'); return; }
-
+    let yesterday = new Date(d); yesterday.setDate(yesterday.getDate() - 1);
+    if (!hasData(todayStr) && !hasData(getLocalDateString(yesterday))) { badgeEl.classList.add('hidden'); return; }
     for (let i = 0; i < 365; i++) {
-        let checkDate = new Date();
-        checkDate.setDate(checkDate.getDate() - i);
+        let checkDate = new Date(); checkDate.setDate(checkDate.getDate() - i);
         let dateStr = getLocalDateString(checkDate);
         if (i === 0 && !hasData(dateStr)) continue; 
-        if (hasData(dateStr)) streak++;
-        else break; 
+        if (hasData(dateStr)) streak++; else break; 
     }
-    if (streak > 0) { countEl.innerText = streak; badgeEl.classList.remove('hidden'); } 
-    else { badgeEl.classList.add('hidden'); }
+    if (streak > 0) { countEl.innerText = streak; badgeEl.classList.remove('hidden'); } else { badgeEl.classList.add('hidden'); }
 };
 
 const updateDashboardSummary = () => {
@@ -260,7 +263,6 @@ const updateDashboardSummary = () => {
     const data = myRecords[todayStr];
     const diaryData = myDiaries[todayStr];
     const summaryEl = document.getElementById('today-summary-text');
-    
     let summary = "";
     if(data) {
         if(data.bp) summary += `혈압: ${data.bp}<br>`;
@@ -273,26 +275,20 @@ const updateDashboardSummary = () => {
     
     if(data || (diaryData && diaryData.content)) {
         summaryEl.innerHTML = summary;
-        summaryEl.classList.replace('text-2xl', 'text-xl');
-        summaryEl.classList.replace('md:text-3xl', 'md:text-2xl');
+        summaryEl.classList.replace('text-2xl', 'text-xl'); summaryEl.classList.replace('md:text-3xl', 'md:text-2xl');
     } else {
         summaryEl.innerHTML = "캘린더나 일기장에서<br>오늘을 기록해 보세요!";
-        summaryEl.classList.replace('text-xl', 'text-2xl');
-        summaryEl.classList.replace('md:text-2xl', 'md:text-3xl');
+        summaryEl.classList.replace('text-xl', 'text-2xl'); summaryEl.classList.replace('md:text-2xl', 'md:text-3xl');
     }
 };
 
 const updateRecentDiary = () => {
     const container = document.getElementById('recent-diary-container');
     container.innerHTML = '';
-    
     const dates = Object.keys(myDiaries).sort((a, b) => new Date(b) - new Date(a)).slice(0, 2); 
-        
     if(dates.length === 0) {
-        container.innerHTML = `<p class="text-sm text-slate-400 dark:text-slate-500 text-center py-4">기록된 일기가 없습니다.</p>`;
-        return;
+        container.innerHTML = `<p class="text-sm text-slate-400 dark:text-slate-500 text-center py-4">기록된 일기가 없습니다.</p>`; return;
     }
-    
     dates.forEach(date => {
         const text = myDiaries[date].content; 
         const formattedDate = new Date(date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
@@ -309,15 +305,12 @@ const renderFullDiaryList = () => {
     const listEl = document.getElementById('full-diary-list');
     if(!listEl) return;
     listEl.innerHTML = '';
-
     const dates = Object.keys(myDiaries).sort((a, b) => new Date(b) - new Date(a));
-
     if(dates.length === 0) {
         listEl.innerHTML = `
             <div class="text-center py-10 text-slate-400">
                 <i data-lucide="book-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
                 <p>아직 작성된 일기가 없습니다.</p>
-                <p class="text-xs mt-1">상단의 '새 일기 작성' 버튼을 눌러 첫 일기를 시작해보세요!</p>
             </div>`;
     } else {
         dates.forEach(date => {
@@ -325,47 +318,29 @@ const renderFullDiaryList = () => {
             const d = new Date(date);
             const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
             const formattedDate = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${dayNames[d.getDay()]})`;
-
             listEl.innerHTML += `
                 <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm relative hover:shadow-md transition cursor-pointer" onclick="openDiaryModal('${date}')">
-                    <div class="flex justify-between items-start mb-3">
-                        <h4 class="font-bold text-slate-800 dark:text-white flex items-center gap-2">${formattedDate}</h4>
-                        <button class="text-slate-400 hover:text-purple-500 transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                    </div>
+                    <div class="flex justify-between items-start mb-3"><h4 class="font-bold text-slate-800 dark:text-white">${formattedDate}</h4><button class="text-slate-400 hover:text-purple-500"><i data-lucide="edit-3" class="w-4 h-4"></i></button></div>
                     <p class="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">${data.content}</p>
-                </div>
-            `;
+                </div>`;
         });
     }
     if(window.lucide) window.lucide.createIcons();
 };
 
 const getLocalDateString = (d) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
+    const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
 };
 
-// 캘린더 렌더링 (순수 건강기록만)
 const renderCalendar = () => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
+    const year = currentDate.getFullYear(); const month = currentDate.getMonth();
     document.getElementById('calendar-month-year').innerText = `${year}년 ${month + 1}월`;
-
-    const firstDay = new Date(year, month, 1).getDay();
-    const lastDate = new Date(year, month + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay(); const lastDate = new Date(year, month + 1, 0).getDate();
     const todayStr = getLocalDateString(new Date());
-    
-    const grid = document.getElementById('calendar-grid');
-    grid.innerHTML = '';
+    const grid = document.getElementById('calendar-grid'); grid.innerHTML = '';
 
-    for (let i = 0; i < firstDay; i++) {
-        const emptyCell = document.createElement('div');
-        emptyCell.className = "p-2 rounded-xl bg-transparent";
-        grid.appendChild(emptyCell);
-    }
-
+    for (let i = 0; i < firstDay; i++) { grid.innerHTML += `<div class="p-2 rounded-xl bg-transparent"></div>`; }
     for (let i = 1; i <= lastDate; i++) {
         const cellDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
         const cell = document.createElement('div');
@@ -375,23 +350,18 @@ const renderCalendar = () => {
         const dateSpan = document.createElement('span');
         dateSpan.className = "text-xs md:text-sm font-semibold text-slate-700 dark:text-slate-300 block mb-1 px-1";
         if (new Date(year, month, i).getDay() === 0) dateSpan.classList.add('text-red-500', 'dark:text-red-400');
-        dateSpan.innerText = i;
-        cell.appendChild(dateSpan);
+        dateSpan.innerText = i; cell.appendChild(dateSpan);
 
         if (myRecords[cellDateStr]) {
             const data = myRecords[cellDateStr];
-            const recordsContainer = document.createElement('div');
-            recordsContainer.className = "flex flex-col gap-1 mt-1 w-full";
-            
-            if (data.bp) recordsContainer.innerHTML += `<div class="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="activity" class="w-3 h-3 flex-shrink-0"></i> ${data.bp}</div>`;
-            if (data.water > 0) recordsContainer.innerHTML += `<div class="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="droplet" class="w-3 h-3 flex-shrink-0"></i> ${data.water}잔</div>`;
-            if (data.steps > 0) recordsContainer.innerHTML += `<div class="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="footprints" class="w-3 h-3 flex-shrink-0"></i> ${data.steps}</div>`;
-            if (data.meds) recordsContainer.innerHTML += `<div class="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="pill" class="w-3 h-3 flex-shrink-0"></i> 복용</div>`;
-            if (data.notes) recordsContainer.innerHTML += `<div class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.notes}"><i data-lucide="align-left" class="w-3 h-3 flex-shrink-0"></i> ${data.notes}</div>`;
-            
-            cell.appendChild(recordsContainer);
+            const rc = document.createElement('div'); rc.className = "flex flex-col gap-1 mt-1 w-full";
+            if (data.bp) rc.innerHTML += `<div class="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="activity" class="w-3 h-3 flex-shrink-0"></i> ${data.bp}</div>`;
+            if (data.water > 0) rc.innerHTML += `<div class="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="droplet" class="w-3 h-3 flex-shrink-0"></i> ${data.water}잔</div>`;
+            if (data.steps > 0) rc.innerHTML += `<div class="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="footprints" class="w-3 h-3 flex-shrink-0"></i> ${data.steps}</div>`;
+            if (data.meds) rc.innerHTML += `<div class="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="pill" class="w-3 h-3 flex-shrink-0"></i> 복용</div>`;
+            if (data.notes) rc.innerHTML += `<div class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="align-left" class="w-3 h-3 flex-shrink-0"></i> ${data.notes}</div>`;
+            cell.appendChild(rc);
         }
-
         cell.addEventListener('click', () => openRecordModal(cellDateStr, year, month + 1, i));
         grid.appendChild(cell);
     }
@@ -402,169 +372,93 @@ document.getElementById('prev-month').addEventListener('click', () => { currentD
 document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
 document.getElementById('today-month').addEventListener('click', () => { currentDate = new Date(); renderCalendar(); });
 
-// ----------------------------------------------------
-// 모달창 로직 (캘린더용 / 일기용 완전 분리)
-// ----------------------------------------------------
-
-// 1. 캘린더용 건강 기록 모달
 const recordModal = document.getElementById('record-modal');
 let activeRecordDate = "";
-
 const openRecordModal = (dateStr, y, m, d) => {
-    activeRecordDate = dateStr;
-    document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일`;
+    activeRecordDate = dateStr; document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일`;
     const data = myRecords[dateStr] || { bp: "", water: 0, steps: "", meds: false, notes: "" };
-    
-    document.getElementById('record-bp').value = data.bp;
-    document.getElementById('record-water').value = data.water;
-    document.getElementById('record-steps').value = data.steps || "";
-    document.getElementById('record-meds').checked = data.meds;
+    document.getElementById('record-bp').value = data.bp; document.getElementById('record-water').value = data.water;
+    document.getElementById('record-steps').value = data.steps || ""; document.getElementById('record-meds').checked = data.meds;
     document.getElementById('record-notes').value = data.notes;
-    
     recordModal.classList.remove('hidden');
 };
-
 document.getElementById('close-modal-btn').addEventListener('click', () => recordModal.classList.add('hidden'));
 
 document.getElementById('save-record-btn').addEventListener('click', async () => {
     if (!currentUser) return;
-    const bp = document.getElementById('record-bp').value.trim();
-    const water = parseInt(document.getElementById('record-water').value) || 0;
-    const steps = parseInt(document.getElementById('record-steps').value) || 0;
-    const meds = document.getElementById('record-meds').checked;
+    const bp = document.getElementById('record-bp').value.trim(); const water = parseInt(document.getElementById('record-water').value) || 0;
+    const steps = parseInt(document.getElementById('record-steps').value) || 0; const meds = document.getElementById('record-meds').checked;
     const notes = document.getElementById('record-notes').value.trim();
     
-    const recordData = { bp, water, steps, meds, notes, updatedAt: new Date().toISOString() };
-
     try {
-        const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'healthRecords', activeRecordDate);
-        await setDoc(docRef, recordData, { merge: true });
-        showMsg("건강 수치가 저장되었습니다!", "success");
-        recordModal.classList.add('hidden');
+        await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'healthRecords', activeRecordDate), { bp, water, steps, meds, notes, updatedAt: new Date().toISOString() }, { merge: true });
+        showMsg("저장되었습니다!", "success"); recordModal.classList.add('hidden');
     } catch (error) { showMsg("오류가 발생했습니다.", "error"); }
 });
 
-// 2. 일기장용 모달
 const diaryModal = document.getElementById('diary-modal');
 const diaryDateInput = document.getElementById('diary-date-input');
 const diaryContentInput = document.getElementById('diary-content-input');
-
 const openDiaryModal = (dateStr) => {
-    // 날짜가 지정안되었으면 오늘 날짜로 세팅
     if(!dateStr) dateStr = getLocalDateString(new Date());
-    
-    diaryDateInput.value = dateStr;
-    const data = myDiaries[dateStr];
-    diaryContentInput.value = data ? data.content : "";
-    
+    diaryDateInput.value = dateStr; const data = myDiaries[dateStr]; diaryContentInput.value = data ? data.content : "";
     diaryModal.classList.remove('hidden');
 };
-
-// 일기 쓰기 버튼 누르면 팝업 열기
 document.getElementById('open-write-diary-btn').addEventListener('click', () => openDiaryModal());
 document.getElementById('close-diary-modal-btn').addEventListener('click', () => diaryModal.classList.add('hidden'));
+diaryDateInput.addEventListener('change', (e) => { const data = myDiaries[e.target.value]; diaryContentInput.value = data ? data.content : ""; });
 
-// 날짜를 바꾸면 해당 날짜의 일기 내용을 불러오기
-diaryDateInput.addEventListener('change', (e) => {
-    const selectedDate = e.target.value;
-    const data = myDiaries[selectedDate];
-    diaryContentInput.value = data ? data.content : "";
-});
-
-// 일기 저장하기 (diaries 컬렉션으로 분리 저장!)
 document.getElementById('save-diary-btn').addEventListener('click', async () => {
     if (!currentUser) return;
-    const selectedDate = diaryDateInput.value;
-    const content = diaryContentInput.value.trim();
-    
-    if(!selectedDate || !content) return showMsg("날짜와 내용을 모두 입력해주세요.", "error");
-
+    const selectedDate = diaryDateInput.value; const content = diaryContentInput.value.trim();
+    if(!selectedDate || !content) return showMsg("내용을 입력해주세요.", "error");
     try {
-        const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'diaries', selectedDate);
-        await setDoc(docRef, { content, updatedAt: new Date().toISOString() }, { merge: true });
-        showMsg("일기가 저장되었습니다!", "success");
-        diaryModal.classList.add('hidden');
-    } catch (error) { showMsg("일기 저장 중 오류가 발생했습니다.", "error"); }
+        await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'diaries', selectedDate), { content, updatedAt: new Date().toISOString() }, { merge: true });
+        showMsg("일기가 저장되었습니다!", "success"); diaryModal.classList.add('hidden');
+    } catch (error) { showMsg("오류 발생.", "error"); }
 });
 
-// --- 차트 로직 ---
-let healthChartInstance = null;
-let currentChartType = 'steps'; 
-
+let healthChartInstance = null; let currentChartType = 'steps'; 
 const renderChart = () => {
-    const canvas = document.getElementById('healthChart');
-    if(!canvas) return; 
-    const ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('healthChart'); if(!canvas) return; const ctx = canvas.getContext('2d');
     if (healthChartInstance) healthChartInstance.destroy(); 
+    const labels = []; const dataset1 = []; const dataset2 = []; 
 
-    const labels = [];
-    const dataset1 = []; 
-    const dataset2 = []; 
-
-    const today = new Date();
-    const currentDayOfWeek = today.getDay(); 
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - currentDayOfWeek);
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    
-    const rangeText = `(${startOfWeek.getMonth()+1}/${startOfWeek.getDate()} ~ ${endOfWeek.getMonth()+1}/${endOfWeek.getDate()})`;
-    document.getElementById('chart-date-range').innerText = rangeText;
+    const today = new Date(); const currentDayOfWeek = today.getDay(); 
+    const startOfWeek = new Date(today); startOfWeek.setDate(today.getDate() - currentDayOfWeek);
+    const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6);
+    document.getElementById('chart-date-range').innerText = `(${startOfWeek.getMonth()+1}/${startOfWeek.getDate()} ~ ${endOfWeek.getMonth()+1}/${endOfWeek.getDate()})`;
 
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
     for(let i = 0; i < 7; i++) {
-        const d = new Date(startOfWeek);
-        d.setDate(startOfWeek.getDate() + i);
-        const dateStr = getLocalDateString(d);
+        const d = new Date(startOfWeek); d.setDate(startOfWeek.getDate() + i);
         labels.push(`${d.getMonth()+1}/${d.getDate()}(${dayNames[d.getDay()]})`);
-        
-        const data = myRecords[dateStr] || {};
-        
+        const data = myRecords[getLocalDateString(d)] || {};
         if (currentChartType === 'steps') dataset1.push(data.steps || 0);
         else if (currentChartType === 'water') dataset1.push(data.water || 0);
         else if (currentChartType === 'bp') {
             let sys = 0, dia = 0;
-            if(data.bp && data.bp.includes('/')) {
-                const parts = data.bp.split('/');
-                sys = parseInt(parts[0]) || 0;
-                dia = parseInt(parts[1]) || 0;
-            }
-            dataset1.push(sys);
-            dataset2.push(dia);
+            if(data.bp && data.bp.includes('/')) { const parts = data.bp.split('/'); sys = parseInt(parts[0]) || 0; dia = parseInt(parts[1]) || 0; }
+            dataset1.push(sys); dataset2.push(dia);
         }
     }
 
     const isDark = document.documentElement.classList.contains('dark');
-    const textColor = isDark ? '#94a3b8' : '#64748b';
-    const gridColor = isDark ? '#334155' : '#e2e8f0';
+    const textColor = isDark ? '#94a3b8' : '#64748b'; const gridColor = isDark ? '#334155' : '#e2e8f0';
     Chart.defaults.color = textColor;
-
     let yAxisConfig = { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } };
-
-    if (currentChartType === 'water') {
-        yAxisConfig.suggestedMax = 10;
-        yAxisConfig.ticks.stepSize = 1;
-    } else if (currentChartType === 'bp') {
-        yAxisConfig.beginAtZero = false;
-        yAxisConfig.suggestedMin = 60;
-        yAxisConfig.suggestedMax = 160;
-    }
+    if (currentChartType === 'water') { yAxisConfig.suggestedMax = 10; yAxisConfig.ticks.stepSize = 1; } 
+    else if (currentChartType === 'bp') { yAxisConfig.beginAtZero = false; yAxisConfig.suggestedMin = 60; yAxisConfig.suggestedMax = 160; }
 
     const config = {
-        type: currentChartType === 'bp' ? 'line' : 'bar',
-        data: { labels: labels, datasets: [] },
-        options: { 
-            responsive: true, maintainAspectRatio: false, 
-            plugins: { legend: { display: currentChartType === 'bp', labels: { color: textColor } } },
-            scales: { y: yAxisConfig, x: { grid: { display: false }, ticks: { color: textColor } } }
-        }
+        type: currentChartType === 'bp' ? 'line' : 'bar', data: { labels: labels, datasets: [] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: currentChartType === 'bp', labels: { color: textColor } } }, scales: { y: yAxisConfig, x: { grid: { display: false }, ticks: { color: textColor } } } }
     };
-
     if (currentChartType === 'steps') config.data.datasets.push({ label: '걸음수(보)', data: dataset1, backgroundColor: '#10b981', borderRadius: 4 });
     else if (currentChartType === 'water') config.data.datasets.push({ label: '수분(잔)', data: dataset1, backgroundColor: '#3b82f6', borderRadius: 4 });
     else if (currentChartType === 'bp') {
-        config.data.datasets.push({ label: '수축기(최고)', data: dataset1, borderColor: '#f43f5e', backgroundColor: '#f43f5e', tension: 0.3 });
-        config.data.datasets.push({ label: '이완기(최저)', data: dataset2, borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3 });
+        config.data.datasets.push({ label: '수축기', data: dataset1, borderColor: '#f43f5e', backgroundColor: '#f43f5e', tension: 0.3 });
+        config.data.datasets.push({ label: '이완기', data: dataset2, borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3 });
     }
     healthChartInstance = new Chart(ctx, config);
 };
@@ -573,111 +467,275 @@ const renderChart = () => {
     const btn = document.getElementById(`chart-tab-${type}`);
     if(btn) {
         btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.chart-tab').forEach(el => {
-                el.classList.remove('bg-white', 'text-blue-600', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-blue-400');
-                el.classList.add('text-slate-500', 'dark:text-slate-400');
-            });
-            e.target.classList.remove('text-slate-500', 'dark:text-slate-400');
-            e.target.classList.add('bg-white', 'text-blue-600', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-blue-400');
-            currentChartType = type;
-            renderChart();
+            document.querySelectorAll('.chart-tab').forEach(el => { el.classList.remove('bg-white', 'text-blue-600', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-blue-400'); el.classList.add('text-slate-500', 'dark:text-slate-400'); });
+            e.target.classList.remove('text-slate-500', 'dark:text-slate-400'); e.target.classList.add('bg-white', 'text-blue-600', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-blue-400');
+            currentChartType = type; renderChart();
         });
     }
 });
 
-// 알람 로직
+// ----------------------------------------------------
+// 🌟 [추가됨] 오운완 커뮤니티 로직
+// ----------------------------------------------------
+let communityPosts = [];
+let activePostForComment = null; // 댓글을 달려는 글 ID
+
+// 파이어베이스에서 커뮤니티 글 실시간 불러오기 (공용 공간)
+const fetchCommunityPosts = () => {
+    // 모든 유저가 공유하는 전역 컬렉션
+    const postsRef = collection(db, 'artifacts', appId, 'communityPosts');
+    unsubscribeCommunity = onSnapshot(postsRef, (snapshot) => {
+        communityPosts = [];
+        snapshot.forEach((doc) => { communityPosts.push({ id: doc.id, ...doc.data() }); });
+        
+        // 최신 글이 위로 오도록 시간순 정렬
+        communityPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        if(!views.community.classList.contains('hidden')) renderCommunityFeed();
+    });
+};
+
+const renderCommunityFeed = () => {
+    const listEl = document.getElementById('community-feed-list');
+    if(!listEl) return;
+    listEl.innerHTML = '';
+
+    if(communityPosts.length === 0) {
+        listEl.innerHTML = `
+            <div class="text-center py-10 text-slate-400">
+                <i data-lucide="message-square" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+                <p>아직 작성된 글이 없습니다.</p>
+                <p class="text-xs mt-1">가장 먼저 글을 남겨보세요!</p>
+            </div>`;
+    } else {
+        communityPosts.forEach(post => {
+            const d = new Date(post.createdAt);
+            const timeStr = d.toLocaleDateString() === new Date().toLocaleDateString() 
+                            ? `오늘 ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` 
+                            : d.toLocaleDateString();
+                            
+            const isLiked = post.likes && post.likes.includes(currentUser.uid);
+            const likeCount = post.likes ? post.likes.length : 0;
+            const comments = post.comments || [];
+            
+            // 🌟 [추가됨] 관리자(본인 이메일)이거나 본인 글이면 삭제 가능
+            const canDeletePost = post.authorId === currentUser.uid || currentUser.email === ADMIN_EMAIL;
+
+            let commentsHtml = '';
+            if(comments.length > 0) {
+                commentsHtml = `<div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 space-y-2">`;
+                comments.forEach(c => {
+                    // 댓글 삭제 권한 확인 (댓글 작성자 또는 관리자)
+                    const canDeleteComment = c.authorId === currentUser.uid || currentUser.email === ADMIN_EMAIL;
+                    
+                    commentsHtml += `
+                        <div class="bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg text-sm relative group flex justify-between items-start">
+                            <div>
+                                <span class="font-bold text-slate-700 dark:text-slate-300 mr-2">${c.authorName}</span>
+                                <span class="text-slate-600 dark:text-slate-400">${c.text}</span>
+                            </div>
+                            ${canDeleteComment ? `<button class="delete-comment-btn text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition" data-post-id="${post.id}" data-comment-id="${c.id}"><i data-lucide="x" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                        </div>`;
+                });
+                commentsHtml += `</div>`;
+            }
+
+            listEl.innerHTML += `
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm relative">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+                            ${post.authorName.replace('ㅇㅇ(', '').replace(')', '')}
+                        </div>
+                        <div>
+                            <p class="font-bold text-slate-800 dark:text-white text-sm">${post.authorName}</p>
+                            <p class="text-xs text-slate-400">${timeStr}</p>
+                        </div>
+                        ${canDeletePost ? `<button class="delete-post-btn ml-auto text-slate-400 hover:text-red-500" data-id="${post.id}"><i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                    </div>
+                    
+                    <p class="text-slate-700 dark:text-slate-200 whitespace-pre-wrap mb-4">${post.content}</p>
+                    
+                    <div class="flex items-center gap-4 text-slate-500 dark:text-slate-400 text-sm">
+                        <button class="like-btn flex items-center gap-1 transition ${isLiked ? 'text-rose-500' : 'hover:text-rose-500'}" data-id="${post.id}">
+                            <i data-lucide="heart" class="w-5 h-5 pointer-events-none ${isLiked ? 'fill-current' : ''}"></i> ${likeCount}
+                        </button>
+                        <button class="comment-btn flex items-center gap-1 transition hover:text-emerald-500" data-id="${post.id}">
+                            <i data-lucide="message-circle" class="w-5 h-5 pointer-events-none"></i> ${comments.length}
+                        </button>
+                    </div>
+                    
+                    ${commentsHtml}
+                </div>
+            `;
+        });
+    }
+    
+    // 이벤트 리스너 연결
+    document.querySelectorAll('.like-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => toggleLike(e.target.getAttribute('data-id')));
+    });
+    
+    document.querySelectorAll('.comment-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            activePostForComment = e.target.getAttribute('data-id');
+            document.getElementById('comment-input').value = '';
+            document.getElementById('comment-modal').classList.remove('hidden');
+        });
+    });
+
+    document.querySelectorAll('.delete-post-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const postId = e.target.getAttribute('data-id');
+            if(confirm('이 글을 삭제하시겠습니까? (관리자/작성자 권한)')) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'communityPosts', postId));
+                showMsg('글이 삭제되었습니다.');
+            }
+        });
+    });
+
+    // 🌟 [추가됨] 댓글 삭제 로직
+    document.querySelectorAll('.delete-comment-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const postId = e.target.getAttribute('data-post-id');
+            const commentId = e.target.getAttribute('data-comment-id');
+            if(confirm('이 댓글을 삭제하시겠습니까?')) {
+                const postRef = doc(db, 'artifacts', appId, 'communityPosts', postId);
+                const post = communityPosts.find(p => p.id === postId);
+                const commentToRemove = post.comments.find(c => c.id === commentId);
+                await updateDoc(postRef, { comments: arrayRemove(commentToRemove) });
+                showMsg('댓글이 삭제되었습니다.');
+            }
+        });
+    });
+
+    if(window.lucide) window.lucide.createIcons();
+};
+
+// 커뮤니티 글 작성
+document.getElementById('submit-post-btn').addEventListener('click', async () => {
+    if (!currentUser) return;
+    const inputEl = document.getElementById('community-post-input');
+    const content = inputEl.value.trim();
+    
+    if(!content) return showMsg("내용을 입력해주세요!", "error");
+
+    const newPostId = crypto.randomUUID();
+    const authorName = getUserNickname(currentUser.uid); // 🌟 [수정됨] 익명 닉네임 사용
+
+    try {
+        await setDoc(doc(db, 'artifacts', appId, 'communityPosts', newPostId), {
+            content: content,
+            authorId: currentUser.uid,
+            authorName: authorName,
+            likes: [],
+            comments: [],
+            createdAt: new Date().toISOString()
+        });
+        inputEl.value = '';
+        showMsg("글이 등록되었습니다!", "success");
+    } catch (error) {
+        showMsg("글 등록 중 오류가 발생했습니다.", "error");
+    }
+});
+
+// 좋아요 토글
+const toggleLike = async (postId) => {
+    if (!currentUser) return;
+    const postRef = doc(db, 'artifacts', appId, 'communityPosts', postId);
+    const post = communityPosts.find(p => p.id === postId);
+    
+    if(post.likes && post.likes.includes(currentUser.uid)) {
+        await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
+    } else {
+        await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
+    }
+};
+
+// 댓글 달기 모달 닫기
+document.getElementById('close-comment-modal-btn').addEventListener('click', () => {
+    document.getElementById('comment-modal').classList.add('hidden');
+});
+
+// 댓글 전송
+document.getElementById('submit-comment-btn').addEventListener('click', async () => {
+    if (!currentUser || !activePostForComment) return;
+    const commentInput = document.getElementById('comment-input');
+    const text = commentInput.value.trim();
+    
+    if(!text) return showMsg("댓글 내용을 입력해주세요.", "error");
+
+    const postRef = doc(db, 'artifacts', appId, 'communityPosts', activePostForComment);
+    const authorName = getUserNickname(currentUser.uid); // 🌟 [수정됨] 익명 닉네임 사용
+
+    const newComment = {
+        id: crypto.randomUUID(),
+        authorId: currentUser.uid,
+        authorName: authorName,
+        text: text,
+        createdAt: new Date().toISOString()
+    };
+
+    try {
+        await updateDoc(postRef, { comments: arrayUnion(newComment) });
+        document.getElementById('comment-modal').classList.add('hidden');
+        showMsg("댓글이 등록되었습니다.", "success");
+    } catch (error) {
+        showMsg("댓글 등록 실패", "error");
+    }
+});
+
+// ----------------------------------------------------
+// 알람 로직 (기존과 동일)
+// ----------------------------------------------------
 let myAlarms = []; 
 const addAlarmModal = document.getElementById('add-alarm-modal');
 const alarmTriggerModal = document.getElementById('alarm-trigger-modal');
-let alarmTimerId = null;
-let lastTriggeredTime = "";
+let alarmTimerId = null; let lastTriggeredTime = "";
 
 const fetchMyAlarms = (userId) => {
     const alarmsRef = collection(db, 'artifacts', appId, 'users', userId, 'alarms');
     unsubscribeAlarms = onSnapshot(alarmsRef, (snapshot) => {
-        myAlarms = [];
-        snapshot.forEach((doc) => { myAlarms.push({ id: doc.id, ...doc.data() }); });
-        myAlarms.sort((a, b) => a.time.localeCompare(b.time));
-        renderAlarmList();
+        myAlarms = []; snapshot.forEach((doc) => { myAlarms.push({ id: doc.id, ...doc.data() }); });
+        myAlarms.sort((a, b) => a.time.localeCompare(b.time)); renderAlarmList();
     });
 };
 
 const renderAlarmList = () => {
-    const listEl = document.getElementById('alarm-list');
-    listEl.innerHTML = '';
-    if(myAlarms.length === 0) {
-        listEl.innerHTML = `<div class="text-center py-10 text-slate-400 flex flex-col items-center"><i data-lucide="bell-off" class="w-10 h-10 mb-2 opacity-50"></i><p>등록된 알림이 없습니다.</p></div>`;
-    } else {
+    const listEl = document.getElementById('alarm-list'); listEl.innerHTML = '';
+    if(myAlarms.length === 0) listEl.innerHTML = `<div class="text-center py-10 text-slate-400 flex flex-col items-center"><i data-lucide="bell-off" class="w-10 h-10 mb-2 opacity-50"></i><p>등록된 알림이 없습니다.</p></div>`;
+    else {
         myAlarms.forEach(alarm => {
             const item = document.createElement('div');
             item.className = "flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm";
-            item.innerHTML = `
-                <div class="flex items-center gap-4">
-                    <div class="text-2xl font-black text-slate-800 dark:text-white">${alarm.time}</div>
-                    <div class="font-bold text-slate-600 dark:text-slate-300">${alarm.title}</div>
-                </div>
-                <button class="delete-alarm-btn text-slate-400 hover:text-red-500 p-2 transition" data-id="${alarm.id}"><i data-lucide="trash-2" class="w-5 h-5 pointer-events-none"></i></button>
-            `;
+            item.innerHTML = `<div class="flex items-center gap-4"><div class="text-2xl font-black text-slate-800 dark:text-white">${alarm.time}</div><div class="font-bold text-slate-600 dark:text-slate-300">${alarm.title}</div></div><button class="delete-alarm-btn text-slate-400 hover:text-red-500 p-2 transition" data-id="${alarm.id}"><i data-lucide="trash-2" class="w-5 h-5 pointer-events-none"></i></button>`;
             listEl.appendChild(item);
         });
     }
-    document.querySelectorAll('.delete-alarm-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            const alarmId = e.target.getAttribute('data-id');
-            if(confirm('이 알림을 삭제할까요?')) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'alarms', alarmId));
-                showMsg('알림이 삭제되었습니다.');
-            }
-        });
-    });
+    document.querySelectorAll('.delete-alarm-btn').forEach(btn => { btn.addEventListener('click', async (e) => { if(confirm('삭제할까요?')) { await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'alarms', e.target.getAttribute('data-id'))); showMsg('삭제되었습니다.'); } }); });
     if(window.lucide) window.lucide.createIcons();
 };
 
-document.getElementById('open-add-alarm-btn').addEventListener('click', () => {
-    document.getElementById('alarm-time-input').value = "09:00";
-    document.getElementById('alarm-title-input').value = "";
-    addAlarmModal.classList.remove('hidden');
-});
+document.getElementById('open-add-alarm-btn').addEventListener('click', () => { document.getElementById('alarm-time-input').value = "09:00"; document.getElementById('alarm-title-input').value = ""; addAlarmModal.classList.remove('hidden'); });
 document.getElementById('close-alarm-modal-btn').addEventListener('click', () => addAlarmModal.classList.add('hidden'));
 
 document.getElementById('save-alarm-btn').addEventListener('click', async () => {
-    const time = document.getElementById('alarm-time-input').value;
-    const title = document.getElementById('alarm-title-input').value.trim();
-    if(!time || !title) return showMsg("시간과 알림 이름을 모두 입력해주세요.", "error");
-
-    const newAlarmId = crypto.randomUUID();
-    try {
-        await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'alarms', newAlarmId), {
-            time: time, title: title, createdAt: new Date().toISOString()
-        });
-        showMsg("알림이 등록되었습니다!", "success");
-        addAlarmModal.classList.add('hidden');
-    } catch(err) { showMsg("저장 실패", "error"); }
+    const time = document.getElementById('alarm-time-input').value; const title = document.getElementById('alarm-title-input').value.trim();
+    if(!time || !title) return showMsg("시간과 이름을 입력해주세요.", "error");
+    try { await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'alarms', crypto.randomUUID()), { time, title, createdAt: new Date().toISOString() }); showMsg("알림 등록 완료!", "success"); addAlarmModal.classList.add('hidden'); } catch(err) { showMsg("저장 실패", "error"); }
 });
 
 const startAlarmChecker = () => {
     if(alarmTimerId) clearInterval(alarmTimerId);
     alarmTimerId = setInterval(() => {
         if(!currentUser || myAlarms.length === 0) return;
-        const now = new Date();
-        const currentHHMM = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
+        const now = new Date(); const currentHHMM = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
         if(currentHHMM !== lastTriggeredTime) {
             const matchingAlarm = myAlarms.find(a => a.time === currentHHMM);
             if(matchingAlarm) {
-                document.getElementById('alarm-trigger-title').innerText = matchingAlarm.title;
-                alarmTriggerModal.classList.remove('hidden');
-                lastTriggeredTime = currentHHMM;
-                alarmAudio.currentTime = 0; 
-                alarmAudio.play().catch(e => console.log("오디오 자동재생 차단됨:", e));
+                document.getElementById('alarm-trigger-title').innerText = matchingAlarm.title; alarmTriggerModal.classList.remove('hidden');
+                lastTriggeredTime = currentHHMM; alarmAudio.currentTime = 0; alarmAudio.play().catch(e => console.log("차단됨:", e));
             }
         }
     }, 10000);
 };
-const stopAlarmChecker = () => {
-    if(alarmTimerId) clearInterval(alarmTimerId);
-    lastTriggeredTime = "";
-};
-document.getElementById('dismiss-alarm-btn').addEventListener('click', () => {
-    alarmTriggerModal.classList.add('hidden');
-    alarmAudio.pause(); 
-});
+const stopAlarmChecker = () => { if(alarmTimerId) clearInterval(alarmTimerId); lastTriggeredTime = ""; };
+document.getElementById('dismiss-alarm-btn').addEventListener('click', () => { alarmTriggerModal.classList.add('hidden'); alarmAudio.pause(); });
