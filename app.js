@@ -18,7 +18,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'health-diary-app';
 
-// 다크모드
+// 다크모드 제어
 const toggleDarkMode = () => {
     document.documentElement.classList.toggle('dark');
     const isDark = document.documentElement.classList.contains('dark');
@@ -43,6 +43,7 @@ const views = {
     header: document.getElementById('user-header'),
     dashboard: document.getElementById('dashboard-view'),
     calendar: document.getElementById('calendar-view'),
+    diary: document.getElementById('diary-view'), // 일기장 뷰 추가
     alarm: document.getElementById('alarm-view'),
     desktopNav: document.getElementById('desktop-sidebar'),
     mobileNav: document.getElementById('bottom-nav')
@@ -128,6 +129,7 @@ onAuthStateChanged(auth, (user) => {
         views.header.classList.add('hidden');
         views.dashboard.classList.add('hidden');
         views.calendar.classList.add('hidden');
+        views.diary.classList.add('hidden'); // 일기 숨기기
         views.alarm.classList.add('hidden');
         views.desktopNav.classList.add('hidden'); views.desktopNav.classList.remove('md:flex');
         views.mobileNav.classList.add('hidden'); views.mobileNav.classList.remove('flex');
@@ -137,35 +139,57 @@ onAuthStateChanged(auth, (user) => {
 const switchTab = (tabName) => {
     views.dashboard.classList.toggle('hidden', tabName !== 'dashboard');
     views.calendar.classList.toggle('hidden', tabName !== 'calendar');
+    views.diary.classList.toggle('hidden', tabName !== 'diary'); // 일기 뷰 토글
     views.alarm.classList.toggle('hidden', tabName !== 'alarm');
     
     const setBtnStyle = (id, isActive, isMobile = false) => {
         const btn = document.getElementById(id);
         if(!btn) return;
         if(isMobile) {
-            btn.className = isActive ? "flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400" : "flex flex-col items-center gap-1 text-slate-400";
+            btn.className = isActive ? "flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400 w-1/5" : "flex flex-col items-center gap-1 text-slate-400 w-1/5";
         } else {
             btn.className = isActive ? "w-full flex items-center gap-3 px-4 py-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-bold transition" : "w-full flex items-center gap-3 px-4 py-3 text-slate-500 dark:text-slate-400 hover:bg-white/50 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white rounded-xl font-medium transition";
         }
     };
-    setBtnStyle('nav-home', tabName === 'dashboard'); setBtnStyle('nav-calendar', tabName === 'calendar'); setBtnStyle('nav-alarm', tabName === 'alarm');
-    setBtnStyle('mobile-nav-home', tabName === 'dashboard', true); setBtnStyle('mobile-nav-calendar', tabName === 'calendar', true); setBtnStyle('mobile-nav-alarm', tabName === 'alarm', true);
+    
+    setBtnStyle('nav-home', tabName === 'dashboard'); 
+    setBtnStyle('nav-calendar', tabName === 'calendar'); 
+    setBtnStyle('nav-diary', tabName === 'diary'); 
+    setBtnStyle('nav-alarm', tabName === 'alarm');
+    
+    setBtnStyle('mobile-nav-home', tabName === 'dashboard', true); 
+    setBtnStyle('mobile-nav-calendar', tabName === 'calendar', true); 
+    setBtnStyle('mobile-nav-diary', tabName === 'diary', true); 
+    setBtnStyle('mobile-nav-alarm', tabName === 'alarm', true);
 
     if (tabName === 'calendar') renderCalendar();
     if (tabName === 'dashboard') renderChart();
+    if (tabName === 'diary') renderFullDiaryList(); // 일기 탭 이동 시 렌더링
 };
 
 document.getElementById('nav-home').addEventListener('click', () => switchTab('dashboard'));
 document.getElementById('mobile-nav-home').addEventListener('click', () => switchTab('dashboard'));
 document.getElementById('nav-calendar').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('mobile-nav-calendar').addEventListener('click', () => switchTab('calendar'));
-document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
+document.getElementById('nav-diary').addEventListener('click', () => switchTab('diary'));
+document.getElementById('mobile-nav-diary').addEventListener('click', () => switchTab('diary'));
 document.getElementById('nav-alarm').addEventListener('click', () => switchTab('alarm'));
 document.getElementById('mobile-nav-alarm').addEventListener('click', () => switchTab('alarm'));
 
+// 숏컷 버튼들 연결
+document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
+document.getElementById('shortcut-diary-btn').addEventListener('click', () => {
+    const d = new Date();
+    openRecordModal(getLocalDateString(d), d.getFullYear(), d.getMonth() + 1, d.getDate());
+});
+// 일기장 뷰의 '오늘 일기 쓰기' 버튼 연결
+document.getElementById('write-diary-btn').addEventListener('click', () => {
+    const d = new Date();
+    openRecordModal(getLocalDateString(d), d.getFullYear(), d.getMonth() + 1, d.getDate());
+});
 
 // ----------------------------------------------------
-// 기록 및 대시보드 로직
+// 기록 및 대시보드/일기 로직
 // ----------------------------------------------------
 let currentDate = new Date();
 let myRecords = {};
@@ -176,6 +200,7 @@ const fetchMyRecords = (userId) => {
         myRecords = {};
         snapshot.forEach((doc) => { myRecords[doc.id] = doc.data(); });
         if(!views.calendar.classList.contains('hidden')) renderCalendar();
+        if(!views.diary.classList.contains('hidden')) renderFullDiaryList();
         updateDashboardSummary();
         renderChart();
         updateRecentDiary(); 
@@ -184,7 +209,6 @@ const fetchMyRecords = (userId) => {
 
 const hasData = (record) => {
     if(!record) return false;
-    // diary 조건 추가
     return record.bp || record.water > 0 || record.steps > 0 || record.meds || record.notes || record.diary;
 };
 
@@ -243,7 +267,6 @@ const updateRecentDiary = () => {
     const container = document.getElementById('recent-diary-container');
     container.innerHTML = '';
     
-    // notes 대신 diary 필드를 기준으로 가져옵니다.
     const diaries = Object.keys(myRecords)
         .filter(date => myRecords[date].diary && myRecords[date].diary.trim() !== '')
         .sort((a, b) => new Date(b) - new Date(a))
@@ -255,15 +278,59 @@ const updateRecentDiary = () => {
     }
     
     diaries.forEach(date => {
-        const text = myRecords[date].diary; // diary 출력
+        const text = myRecords[date].diary; 
         const formattedDate = new Date(date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
         container.innerHTML += `
-            <div class="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-2xl border border-purple-100 dark:border-purple-800/50 relative cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/40 transition" onclick="document.getElementById('shortcut-calendar-btn').click()">
+            <div class="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-2xl border border-purple-100 dark:border-purple-800/50 relative cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/40 transition" onclick="document.getElementById('nav-diary').click()">
                 <div class="absolute -top-3 -right-2 text-4xl opacity-20">"</div>
                 <p class="text-sm font-semibold text-purple-700 dark:text-purple-300 mb-1">${formattedDate}</p>
                 <p class="text-sm text-slate-700 dark:text-slate-300 line-clamp-3 leading-relaxed">${text}</p>
             </div>`;
     });
+};
+
+// [새로 추가됨] 전체 일기장 목록 렌더링 함수
+const renderFullDiaryList = () => {
+    const listEl = document.getElementById('full-diary-list');
+    if(!listEl) return;
+    listEl.innerHTML = '';
+
+    const diaries = Object.keys(myRecords)
+        .filter(date => myRecords[date].diary && myRecords[date].diary.trim() !== '')
+        .sort((a, b) => new Date(b) - new Date(a));
+
+    if(diaries.length === 0) {
+        listEl.innerHTML = `
+            <div class="text-center py-10 text-slate-400">
+                <i data-lucide="book-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+                <p>아직 작성된 일기가 없습니다.</p>
+                <p class="text-xs mt-1">상단의 '오늘 일기 쓰기' 버튼을 눌러 첫 일기를 시작해보세요!</p>
+            </div>`;
+    } else {
+        diaries.forEach(date => {
+            const data = myRecords[date];
+            const d = new Date(date);
+            const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+            const formattedDate = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${dayNames[d.getDay()]})`;
+
+            // 메모 내용이 있으면 하단에 조그맣게 추가 표시
+            const notesHtml = data.notes ? `<div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1"><i data-lucide="align-left" class="w-3 h-3"></i> 메모: ${data.notes}</div>` : '';
+
+            listEl.innerHTML += `
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm relative hover:shadow-md transition cursor-pointer" onclick="openRecordModal('${date}', ${d.getFullYear()}, ${d.getMonth()+1}, ${d.getDate()})">
+                    <div class="flex justify-between items-start mb-3">
+                        <h4 class="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                            ${formattedDate}
+                        </h4>
+                        <button class="text-slate-400 hover:text-purple-500 transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                    </div>
+                    <p class="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">${data.diary}</p>
+                    ${notesHtml}
+                </div>
+            `;
+        });
+    }
+    if(window.lucide) window.lucide.createIcons();
 };
 
 const getLocalDateString = (d) => {
@@ -312,10 +379,7 @@ const renderCalendar = () => {
             if (data.water > 0) recordsContainer.innerHTML += `<div class="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="droplet" class="w-3 h-3 flex-shrink-0"></i> ${data.water}잔</div>`;
             if (data.steps > 0) recordsContainer.innerHTML += `<div class="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="footprints" class="w-3 h-3 flex-shrink-0"></i> ${data.steps}</div>`;
             if (data.meds) recordsContainer.innerHTML += `<div class="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="pill" class="w-3 h-3 flex-shrink-0"></i> 복용</div>`;
-            
-            // 메모 칩
             if (data.notes) recordsContainer.innerHTML += `<div class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.notes}"><i data-lucide="align-left" class="w-3 h-3 flex-shrink-0"></i> ${data.notes}</div>`;
-            // 일기 칩
             if (data.diary) recordsContainer.innerHTML += `<div class="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.diary}"><i data-lucide="book-open" class="w-3 h-3 flex-shrink-0"></i> 일기 작성됨</div>`;
             
             cell.appendChild(recordsContainer);
@@ -337,7 +401,6 @@ let activeRecordDate = "";
 const openRecordModal = (dateStr, y, m, d) => {
     activeRecordDate = dateStr;
     document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일`;
-    // diary 기본값 추가
     const data = myRecords[dateStr] || { bp: "", water: 0, steps: "", meds: false, notes: "", diary: "" };
     
     document.getElementById('record-bp').value = data.bp;
@@ -345,7 +408,7 @@ const openRecordModal = (dateStr, y, m, d) => {
     document.getElementById('record-steps').value = data.steps || "";
     document.getElementById('record-meds').checked = data.meds;
     document.getElementById('record-notes').value = data.notes;
-    document.getElementById('record-diary').value = data.diary || ""; // 일기 할당
+    document.getElementById('record-diary').value = data.diary || ""; 
     
     recordModal.classList.remove('hidden');
 };
@@ -359,7 +422,7 @@ document.getElementById('save-record-btn').addEventListener('click', async () =>
     const steps = parseInt(document.getElementById('record-steps').value) || 0;
     const meds = document.getElementById('record-meds').checked;
     const notes = document.getElementById('record-notes').value.trim();
-    const diary = document.getElementById('record-diary').value.trim(); // 일기 값 추가
+    const diary = document.getElementById('record-diary').value.trim(); 
     
     const recordData = { bp, water, steps, meds, notes, diary, updatedAt: new Date().toISOString() };
 
@@ -371,7 +434,7 @@ document.getElementById('save-record-btn').addEventListener('click', async () =>
     } catch (error) { showMsg("오류가 발생했습니다.", "error"); }
 });
 
-// --- [변경됨] 차트 로직 (이번 주 범위 및 스케일링 설정) ---
+// --- 차트 로직 ---
 let healthChartInstance = null;
 let currentChartType = 'steps'; 
 
@@ -385,29 +448,21 @@ const renderChart = () => {
     const dataset1 = []; 
     const dataset2 = []; 
 
-    // [로직 수정] "최근 7일" -> "이번 주 일요일 ~ 이번 주 토요일"
     const today = new Date();
-    const currentDayOfWeek = today.getDay(); // 일(0) ~ 토(6)
-    
-    // 이번 주 일요일(시작일) 계산
+    const currentDayOfWeek = today.getDay(); 
     const startOfWeek = new Date(today);
     startOfWeek.setDate(today.getDate() - currentDayOfWeek);
-    
-    // 이번 주 토요일(종료일) 계산
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     
-    // 대시보드 제목 옆에 이번 주 범위(예: 4/5 ~ 4/11) 표시
     const rangeText = `(${startOfWeek.getMonth()+1}/${startOfWeek.getDate()} ~ ${endOfWeek.getMonth()+1}/${endOfWeek.getDate()})`;
     document.getElementById('chart-date-range').innerText = rangeText;
 
-    // 일요일부터 7일간 반복하며 데이터 수집
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
     for(let i = 0; i < 7; i++) {
         const d = new Date(startOfWeek);
         d.setDate(startOfWeek.getDate() + i);
         const dateStr = getLocalDateString(d);
-        
         labels.push(`${d.getMonth()+1}/${d.getDate()}(${dayNames[d.getDay()]})`);
         
         const data = myRecords[dateStr] || {};
@@ -429,22 +484,14 @@ const renderChart = () => {
     const isDark = document.documentElement.classList.contains('dark');
     const textColor = isDark ? '#94a3b8' : '#64748b';
     const gridColor = isDark ? '#334155' : '#e2e8f0';
-
     Chart.defaults.color = textColor;
 
-    // [로직 수정] Y축 단위(스케일) 설정
-    let yAxisConfig = {
-        beginAtZero: true, 
-        grid: { color: gridColor }, 
-        ticks: { color: textColor }
-    };
+    let yAxisConfig = { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } };
 
     if (currentChartType === 'water') {
-        // 수분: 최대 10잔 정도로 맞추고, 1잔 단위로 칸을 나눔
         yAxisConfig.suggestedMax = 10;
         yAxisConfig.ticks.stepSize = 1;
     } else if (currentChartType === 'bp') {
-        // 혈압: 0부터 시작하지 않고 범위를 좁힘 (최소 60, 최대 160)
         yAxisConfig.beginAtZero = false;
         yAxisConfig.suggestedMin = 60;
         yAxisConfig.suggestedMax = 160;
@@ -454,13 +501,9 @@ const renderChart = () => {
         type: currentChartType === 'bp' ? 'line' : 'bar',
         data: { labels: labels, datasets: [] },
         options: { 
-            responsive: true, 
-            maintainAspectRatio: false, 
+            responsive: true, maintainAspectRatio: false, 
             plugins: { legend: { display: currentChartType === 'bp', labels: { color: textColor } } },
-            scales: { 
-                y: yAxisConfig,
-                x: { grid: { display: false }, ticks: { color: textColor } }
-            }
+            scales: { y: yAxisConfig, x: { grid: { display: false }, ticks: { color: textColor } } }
         }
     };
 
@@ -470,7 +513,6 @@ const renderChart = () => {
         config.data.datasets.push({ label: '수축기(최고)', data: dataset1, borderColor: '#f43f5e', backgroundColor: '#f43f5e', tension: 0.3 });
         config.data.datasets.push({ label: '이완기(최저)', data: dataset2, borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3 });
     }
-
     healthChartInstance = new Chart(ctx, config);
 };
 
@@ -484,7 +526,6 @@ const renderChart = () => {
             });
             e.target.classList.remove('text-slate-500', 'dark:text-slate-400');
             e.target.classList.add('bg-white', 'text-blue-600', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-blue-400');
-            
             currentChartType = type;
             renderChart();
         });
@@ -527,7 +568,6 @@ const renderAlarmList = () => {
             listEl.appendChild(item);
         });
     }
-
     document.querySelectorAll('.delete-alarm-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const alarmId = e.target.getAttribute('data-id');
@@ -580,12 +620,10 @@ const startAlarmChecker = () => {
         }
     }, 10000);
 };
-
 const stopAlarmChecker = () => {
     if(alarmTimerId) clearInterval(alarmTimerId);
     lastTriggeredTime = "";
 };
-
 document.getElementById('dismiss-alarm-btn').addEventListener('click', () => {
     alarmTriggerModal.classList.add('hidden');
     alarmAudio.pause(); 
