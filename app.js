@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// [추가됨] getDoc 임포트
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, arrayUnion, arrayRemove, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 // TODO: 본인 파이어베이스 키로 변경하세요!
 const firebaseConfig = {
@@ -18,10 +19,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'health-diary-app';
 
-// 🌟 [새로 추가됨] 관리자 이메일 설정 (본인이 가입할 이메일 주소로 꼭 변경하세요!)
+// 🌟 관리자 이메일 설정 (반드시 본인 이메일로 변경하세요!)
 const ADMIN_EMAIL = "asdf@asdf.com";
 
-// 🌟 [새로 추가됨] 고유 익명 닉네임 생성 함수 (유저 UID 기반 해싱 -> 항상 같은 번호 발급)
+// 고유 익명 닉네임 생성 함수
 const getUserNickname = (uid) => {
     let hash = 0;
     for (let i = 0; i < uid.length; i++) {
@@ -55,7 +56,7 @@ const views = {
     dashboard: document.getElementById('dashboard-view'),
     calendar: document.getElementById('calendar-view'),
     diary: document.getElementById('diary-view'),
-    community: document.getElementById('community-view'), // 커뮤니티 추가
+    community: document.getElementById('community-view'),
     alarm: document.getElementById('alarm-view'),
     desktopNav: document.getElementById('desktop-sidebar'),
     mobileNav: document.getElementById('bottom-nav')
@@ -103,7 +104,7 @@ let currentUser = null;
 let unsubscribeRecords = null;
 let unsubscribeDiaries = null;
 let unsubscribeAlarms = null;
-let unsubscribeCommunity = null; // 커뮤니티 감지기
+let unsubscribeCommunity = null;
 
 document.getElementById('login-btn').addEventListener('click', () => {
     const e = document.getElementById('email-input').value;
@@ -132,7 +133,7 @@ onAuthStateChanged(auth, (user) => {
         fetchMyRecords(user.uid);
         fetchMyDiaries(user.uid);
         fetchMyAlarms(user.uid);
-        fetchCommunityPosts(); // 로그인 시 커뮤니티 글 불러오기
+        fetchCommunityPosts(); 
         startAlarmChecker();
         fetchHealthNews();
     } else {
@@ -204,6 +205,7 @@ document.getElementById('mobile-nav-alarm').addEventListener('click', () => swit
 
 document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('shortcut-diary-btn').addEventListener('click', () => { switchTab('diary'); document.getElementById('open-write-diary-btn').click(); });
+
 
 // ----------------------------------------------------
 // 개인 기록 로직 (건강수치, 일기, 차트 등 기존과 동일)
@@ -475,20 +477,28 @@ const renderChart = () => {
 });
 
 // ----------------------------------------------------
-// 🌟 [추가됨] 오운완 커뮤니티 로직
+// 🌟 커뮤니티 관리 및 뮤트(차단) 로직 
 // ----------------------------------------------------
 let communityPosts = [];
-let activePostForComment = null; // 댓글을 달려는 글 ID
+let activePostForComment = null; 
 
-// 파이어베이스에서 커뮤니티 글 실시간 불러오기 (공용 공간)
+// [새로 추가됨] 뮤트(차단) 상태 확인 함수
+const checkMuteStatus = async (uid) => {
+    try {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'mutedUsers', uid));
+        if(snap.exists()) {
+            const mutedUntil = new Date(snap.data().mutedUntil);
+            if(mutedUntil > new Date()) return mutedUntil; // 차단 기한이 남았으면 시간 반환
+        }
+    } catch(e) { console.error(e); }
+    return false;
+};
+
 const fetchCommunityPosts = () => {
-    // 모든 유저가 공유하는 전역 컬렉션
     const postsRef = collection(db, 'artifacts', appId, 'communityPosts');
     unsubscribeCommunity = onSnapshot(postsRef, (snapshot) => {
         communityPosts = [];
         snapshot.forEach((doc) => { communityPosts.push({ id: doc.id, ...doc.data() }); });
-        
-        // 최신 글이 위로 오도록 시간순 정렬
         communityPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         if(!views.community.classList.contains('hidden')) renderCommunityFeed();
     });
@@ -504,7 +514,6 @@ const renderCommunityFeed = () => {
             <div class="text-center py-10 text-slate-400">
                 <i data-lucide="message-square" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
                 <p>아직 작성된 글이 없습니다.</p>
-                <p class="text-xs mt-1">가장 먼저 글을 남겨보세요!</p>
             </div>`;
     } else {
         communityPosts.forEach(post => {
@@ -517,23 +526,38 @@ const renderCommunityFeed = () => {
             const likeCount = post.likes ? post.likes.length : 0;
             const comments = post.comments || [];
             
-            // 🌟 [추가됨] 관리자(본인 이메일)이거나 본인 글이면 삭제 가능
-            const canDeletePost = post.authorId === currentUser.uid || currentUser.email === ADMIN_EMAIL;
+            const isAdminView = currentUser.email === ADMIN_EMAIL;
+            const canDeletePost = post.authorId === currentUser.uid || isAdminView;
+            const canMutePostAuthor = isAdminView && !post.isAdmin; // 관리자가 아니면 뮤트 가능
+
+            // 👑 관리자 전용 아바타/닉네임 스타일
+            const avatarHtml = post.isAdmin 
+                ? `<div class="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400 font-bold text-sm">👑</div>`
+                : `<div class="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-sm">${post.authorName.replace('ㅇㅇ(', '').replace(')', '')}</div>`;
+            
+            const authorNameHtml = post.isAdmin
+                ? `<p class="font-bold text-amber-500 text-sm">👑 관리자</p>`
+                : `<p class="font-bold text-slate-800 dark:text-white text-sm">${post.authorName}</p>`;
 
             let commentsHtml = '';
             if(comments.length > 0) {
                 commentsHtml = `<div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 space-y-2">`;
                 comments.forEach(c => {
-                    // 댓글 삭제 권한 확인 (댓글 작성자 또는 관리자)
-                    const canDeleteComment = c.authorId === currentUser.uid || currentUser.email === ADMIN_EMAIL;
+                    const canDeleteComment = c.authorId === currentUser.uid || isAdminView;
+                    const canMuteCommentAuthor = isAdminView && !c.isAdmin;
                     
+                    const commentName = c.isAdmin ? `<span class="font-bold text-amber-500 mr-2">👑 관리자</span>` : `<span class="font-bold text-slate-700 dark:text-slate-300 mr-2">${c.authorName}</span>`;
+
                     commentsHtml += `
                         <div class="bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg text-sm relative group flex justify-between items-start">
                             <div>
-                                <span class="font-bold text-slate-700 dark:text-slate-300 mr-2">${c.authorName}</span>
+                                ${commentName}
                                 <span class="text-slate-600 dark:text-slate-400">${c.text}</span>
                             </div>
-                            ${canDeleteComment ? `<button class="delete-comment-btn text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition" data-post-id="${post.id}" data-comment-id="${c.id}"><i data-lucide="x" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                            <div class="flex items-center gap-2">
+                                ${canMuteCommentAuthor ? `<button class="mute-user-btn text-slate-400 hover:text-orange-500 opacity-0 group-hover:opacity-100 transition" data-uid="${c.authorId}" title="이 사용자 뮤트(차단)"><i data-lucide="mic-off" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                                ${canDeleteComment ? `<button class="delete-comment-btn text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition" data-post-id="${post.id}" data-comment-id="${c.id}" title="댓글 삭제"><i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                            </div>
                         </div>`;
                 });
                 commentsHtml += `</div>`;
@@ -542,14 +566,15 @@ const renderCommunityFeed = () => {
             listEl.innerHTML += `
                 <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm relative">
                     <div class="flex items-center gap-3 mb-3">
-                        <div class="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-sm">
-                            ${post.authorName.replace('ㅇㅇ(', '').replace(')', '')}
-                        </div>
+                        ${avatarHtml}
                         <div>
-                            <p class="font-bold text-slate-800 dark:text-white text-sm">${post.authorName}</p>
+                            ${authorNameHtml}
                             <p class="text-xs text-slate-400">${timeStr}</p>
                         </div>
-                        ${canDeletePost ? `<button class="delete-post-btn ml-auto text-slate-400 hover:text-red-500" data-id="${post.id}"><i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                        <div class="ml-auto flex items-center gap-3">
+                            ${canMutePostAuthor ? `<button class="mute-user-btn text-slate-400 hover:text-orange-500" data-uid="${post.authorId}" title="이 사용자 뮤트(차단)"><i data-lucide="mic-off" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                            ${canDeletePost ? `<button class="delete-post-btn text-slate-400 hover:text-red-500" data-id="${post.id}" title="글 삭제"><i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i></button>` : ''}
+                        </div>
                     </div>
                     
                     <p class="text-slate-700 dark:text-slate-200 whitespace-pre-wrap mb-4">${post.content}</p>
@@ -569,7 +594,6 @@ const renderCommunityFeed = () => {
         });
     }
     
-    // 이벤트 리스너 연결
     document.querySelectorAll('.like-btn').forEach(btn => {
         btn.addEventListener('click', (e) => toggleLike(e.target.getAttribute('data-id')));
     });
@@ -584,25 +608,35 @@ const renderCommunityFeed = () => {
 
     document.querySelectorAll('.delete-post-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
-            const postId = e.target.getAttribute('data-id');
-            if(confirm('이 글을 삭제하시겠습니까? (관리자/작성자 권한)')) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'communityPosts', postId));
+            if(confirm('이 글을 삭제하시겠습니까?')) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'communityPosts', e.target.getAttribute('data-id')));
                 showMsg('글이 삭제되었습니다.');
             }
         });
     });
 
-    // 🌟 [추가됨] 댓글 삭제 로직
     document.querySelectorAll('.delete-comment-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
-            const postId = e.target.getAttribute('data-post-id');
-            const commentId = e.target.getAttribute('data-comment-id');
             if(confirm('이 댓글을 삭제하시겠습니까?')) {
-                const postRef = doc(db, 'artifacts', appId, 'communityPosts', postId);
-                const post = communityPosts.find(p => p.id === postId);
-                const commentToRemove = post.comments.find(c => c.id === commentId);
+                const postRef = doc(db, 'artifacts', appId, 'communityPosts', e.target.getAttribute('data-post-id'));
+                const post = communityPosts.find(p => p.id === e.target.getAttribute('data-post-id'));
+                const commentToRemove = post.comments.find(c => c.id === e.target.getAttribute('data-comment-id'));
                 await updateDoc(postRef, { comments: arrayRemove(commentToRemove) });
                 showMsg('댓글이 삭제되었습니다.');
+            }
+        });
+    });
+
+    // 🌟 [추가됨] 관리자 전용 뮤트 버튼 이벤트
+    document.querySelectorAll('.mute-user-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const targetUid = e.target.getAttribute('data-uid');
+            const days = prompt('몇 일 동안 글쓰기를 차단하시겠습니까? (숫자만 입력)');
+            if(days && !isNaN(days)) {
+                const unbanDate = new Date();
+                unbanDate.setDate(unbanDate.getDate() + parseInt(days));
+                await setDoc(doc(db, 'artifacts', appId, 'mutedUsers', targetUid), { mutedUntil: unbanDate.toISOString() });
+                showMsg(`해당 사용자가 ${days}일간 차단되었습니다.`, 'success');
             }
         });
     });
@@ -610,22 +644,29 @@ const renderCommunityFeed = () => {
     if(window.lucide) window.lucide.createIcons();
 };
 
-// 커뮤니티 글 작성
+// 글 등록 (+ 뮤트 체크 및 관리자 체크)
 document.getElementById('submit-post-btn').addEventListener('click', async () => {
     if (!currentUser) return;
     const inputEl = document.getElementById('community-post-input');
     const content = inputEl.value.trim();
-    
     if(!content) return showMsg("내용을 입력해주세요!", "error");
 
+    // 🌟 뮤트(차단) 상태인지 확인
+    const mutedUntil = await checkMuteStatus(currentUser.uid);
+    if(mutedUntil) {
+        return showMsg(`차단된 계정입니다. (${mutedUntil.toLocaleDateString()} 해제)`, "error");
+    }
+
     const newPostId = crypto.randomUUID();
-    const authorName = getUserNickname(currentUser.uid); // 🌟 [수정됨] 익명 닉네임 사용
+    const isUserAdmin = currentUser.email === ADMIN_EMAIL;
+    const authorName = isUserAdmin ? "👑 관리자" : getUserNickname(currentUser.uid);
 
     try {
         await setDoc(doc(db, 'artifacts', appId, 'communityPosts', newPostId), {
             content: content,
             authorId: currentUser.uid,
             authorName: authorName,
+            isAdmin: isUserAdmin, // 관리자 여부 저장
             likes: [],
             comments: [],
             createdAt: new Date().toISOString()
@@ -637,39 +678,41 @@ document.getElementById('submit-post-btn').addEventListener('click', async () =>
     }
 });
 
-// 좋아요 토글
 const toggleLike = async (postId) => {
     if (!currentUser) return;
     const postRef = doc(db, 'artifacts', appId, 'communityPosts', postId);
     const post = communityPosts.find(p => p.id === postId);
-    
-    if(post.likes && post.likes.includes(currentUser.uid)) {
-        await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
-    } else {
-        await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
-    }
+    if(post.likes && post.likes.includes(currentUser.uid)) await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
+    else await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
 };
 
-// 댓글 달기 모달 닫기
 document.getElementById('close-comment-modal-btn').addEventListener('click', () => {
     document.getElementById('comment-modal').classList.add('hidden');
 });
 
-// 댓글 전송
+// 댓글 등록 (+ 뮤트 체크 및 관리자 체크)
 document.getElementById('submit-comment-btn').addEventListener('click', async () => {
     if (!currentUser || !activePostForComment) return;
     const commentInput = document.getElementById('comment-input');
     const text = commentInput.value.trim();
-    
     if(!text) return showMsg("댓글 내용을 입력해주세요.", "error");
 
+    // 🌟 뮤트(차단) 상태인지 확인
+    const mutedUntil = await checkMuteStatus(currentUser.uid);
+    if(mutedUntil) {
+        document.getElementById('comment-modal').classList.add('hidden');
+        return showMsg(`차단된 계정입니다. (${mutedUntil.toLocaleDateString()} 해제)`, "error");
+    }
+
     const postRef = doc(db, 'artifacts', appId, 'communityPosts', activePostForComment);
-    const authorName = getUserNickname(currentUser.uid); // 🌟 [수정됨] 익명 닉네임 사용
+    const isUserAdmin = currentUser.email === ADMIN_EMAIL;
+    const authorName = isUserAdmin ? "👑 관리자" : getUserNickname(currentUser.uid);
 
     const newComment = {
         id: crypto.randomUUID(),
         authorId: currentUser.uid,
         authorName: authorName,
+        isAdmin: isUserAdmin, // 관리자 여부 저장
         text: text,
         createdAt: new Date().toISOString()
     };
@@ -678,9 +721,7 @@ document.getElementById('submit-comment-btn').addEventListener('click', async ()
         await updateDoc(postRef, { comments: arrayUnion(newComment) });
         document.getElementById('comment-modal').classList.add('hidden');
         showMsg("댓글이 등록되었습니다.", "success");
-    } catch (error) {
-        showMsg("댓글 등록 실패", "error");
-    }
+    } catch (error) { showMsg("댓글 등록 실패", "error"); }
 });
 
 // ----------------------------------------------------
