@@ -43,7 +43,7 @@ const views = {
     header: document.getElementById('user-header'),
     dashboard: document.getElementById('dashboard-view'),
     calendar: document.getElementById('calendar-view'),
-    diary: document.getElementById('diary-view'), // 일기장 뷰 추가
+    diary: document.getElementById('diary-view'),
     alarm: document.getElementById('alarm-view'),
     desktopNav: document.getElementById('desktop-sidebar'),
     mobileNav: document.getElementById('bottom-nav')
@@ -91,6 +91,7 @@ const fetchHealthNews = async () => {
 let currentUser = null;
 let unsubscribeRecords = null;
 let unsubscribeAlarms = null;
+let unsubscribeDiaries = null; // [새로 추가] 일기 감지기
 
 document.getElementById('login-btn').addEventListener('click', () => {
     const e = document.getElementById('email-input').value;
@@ -115,21 +116,25 @@ onAuthStateChanged(auth, (user) => {
         views.mobileNav.classList.remove('hidden'); views.mobileNav.classList.add('flex');
         switchTab('dashboard'); 
         document.getElementById('user-greeting').innerText = `${user.email.split('@')[0]}님`;
+        
         fetchMyRecords(user.uid);
         fetchMyAlarms(user.uid);
+        fetchMyDiaries(user.uid); // [새로 추가] 일기 데이터 가져오기
         startAlarmChecker();
         fetchHealthNews();
     } else {
         currentUser = null;
         if (unsubscribeRecords) unsubscribeRecords();
         if (unsubscribeAlarms) unsubscribeAlarms();
+        if (unsubscribeDiaries) unsubscribeDiaries();
         stopAlarmChecker();
-        myRecords = {}; myAlarms = [];
+        
+        myRecords = {}; myAlarms = []; myDiaries = {};
         views.auth.classList.remove('hidden');
         views.header.classList.add('hidden');
         views.dashboard.classList.add('hidden');
         views.calendar.classList.add('hidden');
-        views.diary.classList.add('hidden'); // 일기 숨기기
+        views.diary.classList.add('hidden'); 
         views.alarm.classList.add('hidden');
         views.desktopNav.classList.add('hidden'); views.desktopNav.classList.remove('md:flex');
         views.mobileNav.classList.add('hidden'); views.mobileNav.classList.remove('flex');
@@ -139,7 +144,7 @@ onAuthStateChanged(auth, (user) => {
 const switchTab = (tabName) => {
     views.dashboard.classList.toggle('hidden', tabName !== 'dashboard');
     views.calendar.classList.toggle('hidden', tabName !== 'calendar');
-    views.diary.classList.toggle('hidden', tabName !== 'diary'); // 일기 뷰 토글
+    views.diary.classList.toggle('hidden', tabName !== 'diary'); 
     views.alarm.classList.toggle('hidden', tabName !== 'alarm');
     
     const setBtnStyle = (id, isActive, isMobile = false) => {
@@ -164,7 +169,7 @@ const switchTab = (tabName) => {
 
     if (tabName === 'calendar') renderCalendar();
     if (tabName === 'dashboard') renderChart();
-    if (tabName === 'diary') renderFullDiaryList(); // 일기 탭 이동 시 렌더링
+    if (tabName === 'diary') renderFullDiaryList(); 
 };
 
 document.getElementById('nav-home').addEventListener('click', () => switchTab('dashboard'));
@@ -176,40 +181,51 @@ document.getElementById('mobile-nav-diary').addEventListener('click', () => swit
 document.getElementById('nav-alarm').addEventListener('click', () => switchTab('alarm'));
 document.getElementById('mobile-nav-alarm').addEventListener('click', () => switchTab('alarm'));
 
-// 숏컷 버튼들 연결
+// 숏컷
 document.getElementById('shortcut-calendar-btn').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('shortcut-diary-btn').addEventListener('click', () => {
-    const d = new Date();
-    openRecordModal(getLocalDateString(d), d.getFullYear(), d.getMonth() + 1, d.getDate());
-});
-// 일기장 뷰의 '오늘 일기 쓰기' 버튼 연결
-document.getElementById('write-diary-btn').addEventListener('click', () => {
-    const d = new Date();
-    openRecordModal(getLocalDateString(d), d.getFullYear(), d.getMonth() + 1, d.getDate());
+    switchTab('diary');
+    document.getElementById('open-write-diary-btn').click();
 });
 
+
 // ----------------------------------------------------
-// 기록 및 대시보드/일기 로직
+// [수정됨] 건강 수치(캘린더) & 독립된 일기장 로직
 // ----------------------------------------------------
 let currentDate = new Date();
-let myRecords = {};
+let myRecords = {}; // 건강 기록 저장소 (healthRecords)
+let myDiaries = {}; // 일기 저장소 (diaries) - 완전히 분리!
 
+// 1. 건강 수치 가져오기
 const fetchMyRecords = (userId) => {
     const recordsRef = collection(db, 'artifacts', appId, 'users', userId, 'healthRecords');
     unsubscribeRecords = onSnapshot(recordsRef, (snapshot) => {
         myRecords = {};
         snapshot.forEach((doc) => { myRecords[doc.id] = doc.data(); });
         if(!views.calendar.classList.contains('hidden')) renderCalendar();
-        if(!views.diary.classList.contains('hidden')) renderFullDiaryList();
         updateDashboardSummary();
         renderChart();
+    });
+};
+
+// 2. 일기장 데이터만 따로 가져오기
+const fetchMyDiaries = (userId) => {
+    const diariesRef = collection(db, 'artifacts', appId, 'users', userId, 'diaries');
+    unsubscribeDiaries = onSnapshot(diariesRef, (snapshot) => {
+        myDiaries = {};
+        snapshot.forEach((doc) => { myDiaries[doc.id] = doc.data(); });
+        if(!views.diary.classList.contains('hidden')) renderFullDiaryList();
+        updateDashboardSummary();
         updateRecentDiary(); 
     });
 };
 
-const hasData = (record) => {
-    if(!record) return false;
-    return record.bp || record.water > 0 || record.steps > 0 || record.meds || record.notes || record.diary;
+const hasData = (dateStr) => {
+    const rec = myRecords[dateStr];
+    const dia = myDiaries[dateStr];
+    const hasRec = rec && (rec.bp || rec.water > 0 || rec.steps > 0 || rec.meds || rec.notes);
+    const hasDia = dia && dia.content;
+    return hasRec || hasDia; // 건강기록이나 일기 중 하나라도 있으면 스트릭 인정
 };
 
 const updateStreakUI = () => {
@@ -224,14 +240,14 @@ const updateStreakUI = () => {
     yesterday.setDate(yesterday.getDate() - 1);
     let yesterdayStr = getLocalDateString(yesterday);
 
-    if (!hasData(myRecords[todayStr]) && !hasData(myRecords[yesterdayStr])) { badgeEl.classList.add('hidden'); return; }
+    if (!hasData(todayStr) && !hasData(yesterdayStr)) { badgeEl.classList.add('hidden'); return; }
 
     for (let i = 0; i < 365; i++) {
         let checkDate = new Date();
         checkDate.setDate(checkDate.getDate() - i);
         let dateStr = getLocalDateString(checkDate);
-        if (i === 0 && !hasData(myRecords[dateStr])) continue; 
-        if (hasData(myRecords[dateStr])) streak++;
+        if (i === 0 && !hasData(dateStr)) continue; 
+        if (hasData(dateStr)) streak++;
         else break; 
     }
     if (streak > 0) { countEl.innerText = streak; badgeEl.classList.remove('hidden'); } 
@@ -242,22 +258,25 @@ const updateDashboardSummary = () => {
     updateStreakUI();
     const todayStr = getLocalDateString(new Date());
     const data = myRecords[todayStr];
+    const diaryData = myDiaries[todayStr];
     const summaryEl = document.getElementById('today-summary-text');
     
+    let summary = "";
     if(data) {
-        let summary = "";
         if(data.bp) summary += `혈압: ${data.bp}<br>`;
         if(data.water > 0) summary += `수분: ${data.water}잔<br>`;
         if(data.steps > 0) summary += `걸음수: ${data.steps}보<br>`;
         if(data.meds) summary += `약 복용: 완료<br>`;
-        if(!summary && (data.notes || data.diary)) summary = "오늘의 일기가 작성되었습니다!";
-        else if(!summary) summary = "기록된 항목이 없습니다.";
-        
+    }
+    if(!summary && diaryData && diaryData.content) summary = "오늘의 일기가 작성되었습니다!";
+    else if(!summary) summary = "기록된 항목이 없습니다.";
+    
+    if(data || (diaryData && diaryData.content)) {
         summaryEl.innerHTML = summary;
         summaryEl.classList.replace('text-2xl', 'text-xl');
         summaryEl.classList.replace('md:text-3xl', 'md:text-2xl');
     } else {
-        summaryEl.innerHTML = "캘린더에서 오늘의 기록과<br>일기를 남겨보세요!";
+        summaryEl.innerHTML = "캘린더나 일기장에서<br>오늘을 기록해 보세요!";
         summaryEl.classList.replace('text-xl', 'text-2xl');
         summaryEl.classList.replace('md:text-2xl', 'md:text-3xl');
     }
@@ -267,18 +286,15 @@ const updateRecentDiary = () => {
     const container = document.getElementById('recent-diary-container');
     container.innerHTML = '';
     
-    const diaries = Object.keys(myRecords)
-        .filter(date => myRecords[date].diary && myRecords[date].diary.trim() !== '')
-        .sort((a, b) => new Date(b) - new Date(a))
-        .slice(0, 2); 
+    const dates = Object.keys(myDiaries).sort((a, b) => new Date(b) - new Date(a)).slice(0, 2); 
         
-    if(diaries.length === 0) {
+    if(dates.length === 0) {
         container.innerHTML = `<p class="text-sm text-slate-400 dark:text-slate-500 text-center py-4">기록된 일기가 없습니다.</p>`;
         return;
     }
     
-    diaries.forEach(date => {
-        const text = myRecords[date].diary; 
+    dates.forEach(date => {
+        const text = myDiaries[date].content; 
         const formattedDate = new Date(date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
         container.innerHTML += `
             <div class="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-2xl border border-purple-100 dark:border-purple-800/50 relative cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/40 transition" onclick="document.getElementById('nav-diary').click()">
@@ -289,43 +305,34 @@ const updateRecentDiary = () => {
     });
 };
 
-// [새로 추가됨] 전체 일기장 목록 렌더링 함수
 const renderFullDiaryList = () => {
     const listEl = document.getElementById('full-diary-list');
     if(!listEl) return;
     listEl.innerHTML = '';
 
-    const diaries = Object.keys(myRecords)
-        .filter(date => myRecords[date].diary && myRecords[date].diary.trim() !== '')
-        .sort((a, b) => new Date(b) - new Date(a));
+    const dates = Object.keys(myDiaries).sort((a, b) => new Date(b) - new Date(a));
 
-    if(diaries.length === 0) {
+    if(dates.length === 0) {
         listEl.innerHTML = `
             <div class="text-center py-10 text-slate-400">
                 <i data-lucide="book-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
                 <p>아직 작성된 일기가 없습니다.</p>
-                <p class="text-xs mt-1">상단의 '오늘 일기 쓰기' 버튼을 눌러 첫 일기를 시작해보세요!</p>
+                <p class="text-xs mt-1">상단의 '새 일기 작성' 버튼을 눌러 첫 일기를 시작해보세요!</p>
             </div>`;
     } else {
-        diaries.forEach(date => {
-            const data = myRecords[date];
+        dates.forEach(date => {
+            const data = myDiaries[date];
             const d = new Date(date);
             const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
             const formattedDate = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${dayNames[d.getDay()]})`;
 
-            // 메모 내용이 있으면 하단에 조그맣게 추가 표시
-            const notesHtml = data.notes ? `<div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1"><i data-lucide="align-left" class="w-3 h-3"></i> 메모: ${data.notes}</div>` : '';
-
             listEl.innerHTML += `
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm relative hover:shadow-md transition cursor-pointer" onclick="openRecordModal('${date}', ${d.getFullYear()}, ${d.getMonth()+1}, ${d.getDate()})">
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm relative hover:shadow-md transition cursor-pointer" onclick="openDiaryModal('${date}')">
                     <div class="flex justify-between items-start mb-3">
-                        <h4 class="font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                            ${formattedDate}
-                        </h4>
+                        <h4 class="font-bold text-slate-800 dark:text-white flex items-center gap-2">${formattedDate}</h4>
                         <button class="text-slate-400 hover:text-purple-500 transition"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
                     </div>
-                    <p class="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">${data.diary}</p>
-                    ${notesHtml}
+                    <p class="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">${data.content}</p>
                 </div>
             `;
         });
@@ -340,6 +347,7 @@ const getLocalDateString = (d) => {
     return `${year}-${month}-${day}`;
 };
 
+// 캘린더 렌더링 (순수 건강기록만)
 const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -380,7 +388,6 @@ const renderCalendar = () => {
             if (data.steps > 0) recordsContainer.innerHTML += `<div class="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="footprints" class="w-3 h-3 flex-shrink-0"></i> ${data.steps}</div>`;
             if (data.meds) recordsContainer.innerHTML += `<div class="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text"><i data-lucide="pill" class="w-3 h-3 flex-shrink-0"></i> 복용</div>`;
             if (data.notes) recordsContainer.innerHTML += `<div class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.notes}"><i data-lucide="align-left" class="w-3 h-3 flex-shrink-0"></i> ${data.notes}</div>`;
-            if (data.diary) recordsContainer.innerHTML += `<div class="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-[10px] md:text-xs px-1.5 py-0.5 rounded flex items-center gap-1 w-full truncate-text" title="${data.diary}"><i data-lucide="book-open" class="w-3 h-3 flex-shrink-0"></i> 일기 작성됨</div>`;
             
             cell.appendChild(recordsContainer);
         }
@@ -395,20 +402,24 @@ document.getElementById('prev-month').addEventListener('click', () => { currentD
 document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
 document.getElementById('today-month').addEventListener('click', () => { currentDate = new Date(); renderCalendar(); });
 
+// ----------------------------------------------------
+// 모달창 로직 (캘린더용 / 일기용 완전 분리)
+// ----------------------------------------------------
+
+// 1. 캘린더용 건강 기록 모달
 const recordModal = document.getElementById('record-modal');
 let activeRecordDate = "";
 
 const openRecordModal = (dateStr, y, m, d) => {
     activeRecordDate = dateStr;
     document.getElementById('modal-date-title').innerText = `${y}년 ${m}월 ${d}일`;
-    const data = myRecords[dateStr] || { bp: "", water: 0, steps: "", meds: false, notes: "", diary: "" };
+    const data = myRecords[dateStr] || { bp: "", water: 0, steps: "", meds: false, notes: "" };
     
     document.getElementById('record-bp').value = data.bp;
     document.getElementById('record-water').value = data.water;
     document.getElementById('record-steps').value = data.steps || "";
     document.getElementById('record-meds').checked = data.meds;
     document.getElementById('record-notes').value = data.notes;
-    document.getElementById('record-diary').value = data.diary || ""; 
     
     recordModal.classList.remove('hidden');
 };
@@ -422,16 +433,58 @@ document.getElementById('save-record-btn').addEventListener('click', async () =>
     const steps = parseInt(document.getElementById('record-steps').value) || 0;
     const meds = document.getElementById('record-meds').checked;
     const notes = document.getElementById('record-notes').value.trim();
-    const diary = document.getElementById('record-diary').value.trim(); 
     
-    const recordData = { bp, water, steps, meds, notes, diary, updatedAt: new Date().toISOString() };
+    const recordData = { bp, water, steps, meds, notes, updatedAt: new Date().toISOString() };
 
     try {
         const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'healthRecords', activeRecordDate);
         await setDoc(docRef, recordData, { merge: true });
-        showMsg("저장되었습니다!", "success");
+        showMsg("건강 수치가 저장되었습니다!", "success");
         recordModal.classList.add('hidden');
     } catch (error) { showMsg("오류가 발생했습니다.", "error"); }
+});
+
+// 2. 일기장용 모달
+const diaryModal = document.getElementById('diary-modal');
+const diaryDateInput = document.getElementById('diary-date-input');
+const diaryContentInput = document.getElementById('diary-content-input');
+
+const openDiaryModal = (dateStr) => {
+    // 날짜가 지정안되었으면 오늘 날짜로 세팅
+    if(!dateStr) dateStr = getLocalDateString(new Date());
+    
+    diaryDateInput.value = dateStr;
+    const data = myDiaries[dateStr];
+    diaryContentInput.value = data ? data.content : "";
+    
+    diaryModal.classList.remove('hidden');
+};
+
+// 일기 쓰기 버튼 누르면 팝업 열기
+document.getElementById('open-write-diary-btn').addEventListener('click', () => openDiaryModal());
+document.getElementById('close-diary-modal-btn').addEventListener('click', () => diaryModal.classList.add('hidden'));
+
+// 날짜를 바꾸면 해당 날짜의 일기 내용을 불러오기
+diaryDateInput.addEventListener('change', (e) => {
+    const selectedDate = e.target.value;
+    const data = myDiaries[selectedDate];
+    diaryContentInput.value = data ? data.content : "";
+});
+
+// 일기 저장하기 (diaries 컬렉션으로 분리 저장!)
+document.getElementById('save-diary-btn').addEventListener('click', async () => {
+    if (!currentUser) return;
+    const selectedDate = diaryDateInput.value;
+    const content = diaryContentInput.value.trim();
+    
+    if(!selectedDate || !content) return showMsg("날짜와 내용을 모두 입력해주세요.", "error");
+
+    try {
+        const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'diaries', selectedDate);
+        await setDoc(docRef, { content, updatedAt: new Date().toISOString() }, { merge: true });
+        showMsg("일기가 저장되었습니다!", "success");
+        diaryModal.classList.add('hidden');
+    } catch (error) { showMsg("일기 저장 중 오류가 발생했습니다.", "error"); }
 });
 
 // --- 차트 로직 ---
