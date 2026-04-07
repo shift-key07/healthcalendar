@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>나만의 건강 관리 웹</title>
+    
+    <!-- 폰트: Pretendard -->
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Pretendard', 'sans-serif'] },
+                    animation: { 'fade-in': 'fadeIn 0.4s ease-out forwards' },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Firebase SDK (v9 모듈 방식) -->
+    <!-- app.js에서 import 방식으로 불러올 것이므로 여기선 제거해도 됨 -->
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { font-family: 'Pretendard', sans-serif; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 text-slate-800 min-h-screen flex justify-center items-center p-0 md:p-6">
+
+    <!-- 웹/모바일 반응형 컨테이너 -->
+    <div class="w-full max-w-6xl h-screen md:h-[90vh] bg-white/40 backdrop-blur-3xl md:rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.08)] border-0 md:border border-white overflow-hidden relative flex flex-row">
+        
+        <!-- 데스크탑 사이드바 (초기 숨김) -->
+        <aside id="desktop-sidebar" class="hidden w-64 glass-card border-r border-white/50 flex-col py-8 px-6 z-10">
+            <div class="flex items-center gap-2 mb-12 text-blue-600">
+                <i data-lucide="heart-pulse" class="w-8 h-8"></i>
+                <span class="text-xl font-extrabold tracking-tight text-slate-800">건강 다이어리</span>
+            </div>
+            <nav class="flex-1 space-y-2">
+                <button class="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold transition">
+                    <i data-lucide="home" class="w-5 h-5"></i> 홈
+                </button>
+                <button class="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-white/50 hover:text-slate-800 rounded-xl font-medium transition">
+                    <i data-lucide="calendar" class="w-5 h-5"></i> 캘린더
+                </button>
+                <button class="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-white/50 hover:text-slate-800 rounded-xl font-medium transition">
+                    <i data-lucide="bell" class="w-5 h-5"></i> 알림
+                </button>
+            </nav>
+        </aside>
+
+        <!-- 우측 메인 컨텐츠 영역 -->
+        <div class="flex-1 flex flex-col relative h-full overflow-hidden">
+
+            <!-- 커스텀 알림 메시지 영역 -->
+            <div id="message-box" class="hidden absolute top-4 left-1/2 transform -translate-x-1/2 z-50 p-4 text-sm rounded-2xl shadow-lg backdrop-blur-md animate-fade-in transition-all w-11/12 max-w-md text-center" role="alert">
+                <span id="message-text" class="font-medium"></span>
+            </div>
+
+            <!-- 스크롤 영역 -->
+            <div class="flex-1 overflow-y-auto p-6 md:p-10 pb-24 md:pb-10">
+                
+                <!-- 로그인 영역 -->
+                <div id="auth-section" class="flex flex-col h-full justify-center items-center animate-fade-in py-10">
+                    <div class="w-full max-w-sm">
+                        <div class="text-center mb-10">
+                            <div class="inline-flex items-center justify-center w-20 h-20 rounded-[1.5rem] bg-gradient-to-tr from-blue-500 to-indigo-600 text-white mb-6 shadow-lg shadow-blue-500/30 transform rotate-3">
+                                <i data-lucide="heart-pulse" class="w-10 h-10"></i>
+                            </div>
+                            <h1 class="text-3xl font-extrabold tracking-tight text-slate-800">건강 다이어리</h1>
+                            <p class="text-slate-500 mt-2 font-medium">나를 위한 매일의 건강한 습관</p>
+                        </div>
+
+                        <div class="glass-card p-6 rounded-3xl shadow-sm space-y-5">
+                            <div class="relative">
+                                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <i data-lucide="mail" class="w-5 h-5 text-slate-400"></i>
+                                </div>
+                                <input type="email" id="email-input" placeholder="이메일 주소" class="w-full pl-11 p-4 bg-white/60 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div class="relative">
+                                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <i data-lucide="lock" class="w-5 h-5 text-slate-400"></i>
+                                </div>
+                                <input type="password" id="password-input" placeholder="비밀번호 (6자리 이상)" class="w-full pl-11 p-4 bg-white/60 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div class="pt-4 flex flex-col gap-3">
+                                <button id="login-btn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold p-4 rounded-2xl">시작하기 (로그인)</button>
+                                <button id="signup-btn" class="w-full bg-white text-slate-700 font-bold p-4 rounded-2xl border border-slate-200">새 계정 만들기</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 메인 대시보드 영역 (초기 숨김) -->
+                <div id="app-content" class="hidden space-y-6 animate-fade-in max-w-5xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 border border-indigo-200">
+                                <i data-lucide="user" class="w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-slate-500 font-medium">환영합니다</p>
+                                <h2 id="user-greeting" class="text-2xl font-bold text-slate-800 leading-tight">사용자님</h2>
+                            </div>
+                        </div>
+                        <button id="logout-btn" class="text-slate-500 hover:text-red-500 transition-colors px-4 py-2 rounded-xl hover:bg-red-50 font-medium flex items-center gap-2">
+                            <i data-lucide="log-out" class="w-5 h-5"></i>
+                            <span class="hidden md:inline">로그아웃</span>
+                        </button>
+                    </div>
+
+                    <!-- 대시보드 그리드 -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+                        <div class="lg:col-span-2 space-y-6">
+                            <div class="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-3xl p-8 text-white relative overflow-hidden">
+                                <div class="absolute -right-6 -top-6 opacity-20 transform rotate-12"><i data-lucide="activity" class="w-40 h-40"></i></div>
+                                <div class="relative z-10">
+                                    <h3 class="font-medium text-blue-100 mb-2 text-lg">오늘의 상태</h3>
+                                    <p class="text-4xl font-bold mb-6">아직 기록이 없어요</p>
+                                    <button class="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2">
+                                        <i data-lucide="plus" class="w-5 h-5"></i> 첫 기록 남기기
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-4 gap-4 md:gap-6">
+                                <div class="flex flex-col items-center gap-3 cursor-pointer group"><div class="w-16 h-16 md:w-20 md:h-20 rounded-2xl glass-card flex items-center justify-center text-rose-500"><i data-lucide="droplet" class="w-8 h-8 md:w-10 md:h-10"></i></div><span class="text-sm font-semibold text-slate-600">혈압/당뇨</span></div>
+                                <div class="flex flex-col items-center gap-3 cursor-pointer group"><div class="w-16 h-16 md:w-20 md:h-20 rounded-2xl glass-card flex items-center justify-center text-emerald-500"><i data-lucide="apple" class="w-8 h-8 md:w-10 md:h-10"></i></div><span class="text-sm font-semibold text-slate-600">식단</span></div>
+                                <div class="flex flex-col items-center gap-3 cursor-pointer group"><div class="w-16 h-16 md:w-20 md:h-20 rounded-2xl glass-card flex items-center justify-center text-blue-500"><i data-lucide="glass-water" class="w-8 h-8 md:w-10 md:h-10"></i></div><span class="text-sm font-semibold text-slate-600">수분</span></div>
+                                <div class="flex flex-col items-center gap-3 cursor-pointer group"><div class="w-16 h-16 md:w-20 md:h-20 rounded-2xl glass-card flex items-center justify-center text-amber-500"><i data-lucide="pill" class="w-8 h-8 md:w-10 md:h-10"></i></div><span class="text-sm font-semibold text-slate-600">복약</span></div>
+                            </div>
+                        </div>
+                        <div class="lg:col-span-1">
+                            <div class="glass-card p-6 rounded-3xl h-full">
+                                <h3 class="font-bold text-slate-800 text-lg flex items-center gap-2 mb-6"><i data-lucide="newspaper" class="w-5 h-5 text-blue-500"></i>건강 팁</h3>
+                                <div class="space-y-4">
+                                    <div class="bg-white/60 p-4 rounded-2xl flex flex-col gap-3"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-500"><i data-lucide="moon" class="w-5 h-5"></i></div><p class="font-bold text-sm">충분한 수면이 다이어트에 미치는 영향</p></div></div>
+                                    <div class="bg-white/60 p-4 rounded-2xl flex flex-col gap-3"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-500"><i data-lucide="activity" class="w-5 h-5"></i></div><p class="font-bold text-sm">사무실에서 하는 거북목 스트레칭</p></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 모바일 하단 네비게이션 바 (초기 숨김) -->
+        <div id="bottom-nav" class="hidden md:hidden absolute bottom-0 w-full glass-card border-t border-white/50 px-6 py-4 justify-between items-center z-10">
+            <button class="flex flex-col items-center gap-1 text-blue-600"><i data-lucide="home" class="w-6 h-6"></i><span class="text-[10px] font-bold">홈</span></button>
+            <button class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="calendar" class="w-6 h-6"></i><span class="text-[10px] font-bold">캘린더</span></button>
+            <button class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="bell" class="w-6 h-6"></i><span class="text-[10px] font-bold">알림</span></button>
+            <button class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="settings" class="w-6 h-6"></i><span class="text-[10px] font-bold">설정</span></button>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons(); // 아이콘 렌더링
+    </script>
+    
+    <!-- 모듈 스크립트 연결! -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
