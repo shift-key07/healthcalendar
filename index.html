@@ -39,7 +39,6 @@
 
     <div class="w-full max-w-6xl h-screen md:h-[90vh] bg-white/40 backdrop-blur-3xl md:rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.08)] border-0 md:border border-white overflow-hidden relative flex flex-row">
         
-        <!-- 데스크탑 사이드바 -->
         <aside id="desktop-sidebar" class="hidden w-64 glass-card border-r border-white/50 flex-col py-8 px-6 z-10">
             <div class="flex items-center gap-2 mb-12 text-blue-600">
                 <i data-lucide="heart-pulse" class="w-8 h-8"></i>
@@ -52,13 +51,11 @@
             </nav>
         </aside>
 
-        <!-- 메인 영역 -->
         <div class="flex-1 flex flex-col relative h-full overflow-hidden">
             <div id="message-box" class="hidden absolute top-4 left-1/2 transform -translate-x-1/2 z-50 p-4 text-sm rounded-2xl shadow-lg backdrop-blur-md transition-all w-11/12 max-w-md text-center" role="alert"><span id="message-text" class="font-medium"></span></div>
 
             <div class="flex-1 overflow-y-auto p-4 md:p-10 pb-24 md:pb-10 relative">
                 
-                <!-- Auth Section -->
                 <div id="auth-section" class="flex flex-col h-full justify-center items-center py-10">
                     <div class="w-full max-w-sm">
                         <div class="text-center mb-10"><div class="inline-flex items-center justify-center w-20 h-20 rounded-[1.5rem] bg-gradient-to-tr from-blue-500 to-indigo-600 text-white mb-6 shadow-lg shadow-blue-500/30 transform rotate-3"><i data-lucide="heart-pulse" class="w-10 h-10"></i></div><h1 class="text-3xl font-extrabold tracking-tight text-slate-800">건강 다이어리</h1></div>
@@ -73,7 +70,6 @@
                     </div>
                 </div>
 
-                <!-- 헤더 -->
                 <div id="user-header" class="hidden justify-between items-center mb-6 animate-fade-in">
                     <div class="flex items-center gap-3">
                         <div class="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 border border-indigo-200"><i data-lucide="user" class="w-6 h-6"></i></div>
@@ -82,19 +78,40 @@
                     <button id="logout-btn" class="text-slate-500 hover:text-red-500 transition-colors px-4 py-2 rounded-xl hover:bg-red-50 font-medium flex items-center gap-2"><i data-lucide="log-out" class="w-5 h-5"></i><span class="hidden md:inline">로그아웃</span></button>
                 </div>
 
-                <!-- 뷰 1: 대시보드 -->
+                <!-- 대시보드 뷰 (뉴스 영역 업데이트) -->
                 <div id="dashboard-view" class="hidden space-y-6 animate-fade-in max-w-5xl mx-auto">
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
                         <div class="lg:col-span-2 space-y-6">
-                            <div class="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-3xl p-8 text-white relative overflow-hidden">
+                            <div class="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-3xl p-8 text-white relative overflow-hidden shadow-lg shadow-blue-500/30">
                                 <div class="absolute -right-6 -top-6 opacity-20 transform rotate-12"><i data-lucide="activity" class="w-40 h-40"></i></div>
-                                <div class="relative z-10"><h3 class="font-medium text-blue-100 mb-2 text-lg">오늘의 기록 요약</h3><p id="today-summary-text" class="text-2xl md:text-3xl font-bold mb-6">캘린더에서 오늘의 건강을<br>기록해 보세요!</p><button id="shortcut-calendar-btn" class="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 transition"><i data-lucide="calendar-plus" class="w-5 h-5"></i> 캘린더로 이동</button></div>
+                                <div class="relative z-10">
+                                    <h3 class="font-medium text-blue-100 mb-2 text-lg">오늘의 기록 요약</h3>
+                                    <p id="today-summary-text" class="text-2xl md:text-3xl font-bold mb-6">캘린더에서 오늘의 건강을<br>기록해 보세요!</p>
+                                    <button id="shortcut-calendar-btn" class="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 transition">
+                                        <i data-lucide="calendar-plus" class="w-5 h-5"></i> 캘린더로 이동
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 구글 뉴스 기반 크롤링 API 연동 영역 -->
+                        <div class="lg:col-span-1">
+                            <div class="glass-card p-6 rounded-3xl h-full shadow-sm">
+                                <h3 class="font-bold text-slate-800 text-lg flex items-center gap-2 mb-4">
+                                    <i data-lucide="newspaper" class="w-5 h-5 text-blue-500"></i> 최신 건강 뉴스
+                                </h3>
+                                <!-- 뉴스가 동적으로 추가될 컨테이너 -->
+                                <div id="health-news-container" class="space-y-3">
+                                    <div class="flex justify-center items-center py-6 text-slate-400">
+                                        <i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 뷰 2: 캘린더 뷰 -->
+                <!-- 캘린더 뷰 (동일) -->
                 <div id="calendar-view" class="hidden space-y-4 animate-fade-in max-w-full mx-auto">
                     <div class="glass-card p-4 md:p-8 rounded-3xl shadow-sm">
                         <div class="flex justify-between items-center mb-6">
@@ -112,46 +129,33 @@
                     </div>
                 </div>
 
-                <!-- 뷰 3: 알림 설정 뷰 (새로 추가됨) -->
+                <!-- 알림 설정 뷰 (동일) -->
                 <div id="alarm-view" class="hidden space-y-6 animate-fade-in max-w-3xl mx-auto">
                     <div class="glass-card p-6 md:p-8 rounded-3xl shadow-sm">
                         <div class="flex justify-between items-center mb-6 border-b border-slate-200 pb-4">
                             <div>
-                                <h3 class="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
-                                    <i data-lucide="bell-ring" class="w-6 h-6 text-amber-500"></i> 내 알림 설정
-                                </h3>
-                                <p class="text-sm text-slate-500 mt-1">웹사이트를 켜두시면 정해진 시간에 알려드려요!</p>
+                                <h3 class="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2"><i data-lucide="bell-ring" class="w-6 h-6 text-amber-500"></i> 내 알림 설정</h3>
+                                <p class="text-sm text-slate-500 mt-1">웹사이트를 켜두시면 정해진 시간에 소리와 함께 알려드려요!</p>
                             </div>
-                            <button id="open-add-alarm-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold transition shadow-md flex items-center gap-1">
-                                <i data-lucide="plus" class="w-4 h-4"></i> 알림 추가
-                            </button>
+                            <button id="open-add-alarm-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold transition shadow-md flex items-center gap-1"><i data-lucide="plus" class="w-4 h-4"></i> 추가</button>
                         </div>
-
-                        <!-- 알람 리스트 표시 영역 -->
-                        <div id="alarm-list" class="space-y-3">
-                            <div class="text-center py-10 text-slate-400 flex flex-col items-center">
-                                <i data-lucide="bell-off" class="w-10 h-10 mb-2 opacity-50"></i>
-                                <p>등록된 알림이 없습니다.</p>
-                            </div>
-                        </div>
+                        <div id="alarm-list" class="space-y-3"></div>
                     </div>
                 </div>
 
             </div>
         </div>
 
-        <!-- 모바일 하단 네비게이션 -->
         <div id="bottom-nav" class="hidden md:hidden absolute bottom-0 w-full glass-card border-t border-white/50 px-6 py-4 justify-around items-center z-10">
             <button id="mobile-nav-home" class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="home" class="w-6 h-6"></i><span class="text-[10px] font-bold">홈</span></button>
             <button id="mobile-nav-calendar" class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="calendar" class="w-6 h-6"></i><span class="text-[10px] font-bold">캘린더</span></button>
             <button id="mobile-nav-alarm" class="flex flex-col items-center gap-1 text-slate-400"><i data-lucide="bell" class="w-6 h-6"></i><span class="text-[10px] font-bold">알림</span></button>
         </div>
-
     </div>
 
-    <!-- 데이터 기록 모달 (달력) -->
+    <!-- 모달들 -->
     <div id="record-modal" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex justify-center items-end md:items-center">
-        <!-- 기존 달력 모달 코드 동일 (생략 없이 원본 유지) -->
+        <!-- 기존 달력 기록 모달 -->
         <div class="bg-white w-full max-w-md md:rounded-3xl rounded-t-3xl shadow-2xl p-6 md:p-8 animate-slide-up relative">
             <button id="close-modal-btn" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-2"><i data-lucide="x" class="w-6 h-6"></i></button>
             <h3 class="text-xl font-bold text-slate-800 mb-1 flex items-center gap-2"><i data-lucide="pen-line" class="text-blue-500 w-5 h-5"></i><span id="modal-date-title">기록</span></h3>
@@ -166,28 +170,19 @@
         </div>
     </div>
 
-    <!-- 알람 추가 모달 (새로 추가됨) -->
     <div id="add-alarm-modal" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex justify-center items-center">
         <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 animate-slide-up relative">
             <button id="close-alarm-modal-btn" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-2"><i data-lucide="x" class="w-6 h-6"></i></button>
             <h3 class="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2"><i data-lucide="alarm-clock-plus" class="text-blue-500 w-5 h-5"></i> 새 알림 설정</h3>
-            
             <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-2">알림 시간 (매일)</label>
-                    <!-- 시간 입력 폼 -->
-                    <input type="time" id="alarm-time-input" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xl font-bold text-center outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-slate-700 mb-2">알림 이름 (예: 혈압 약 먹기)</label>
-                    <input type="text" id="alarm-title-input" placeholder="무엇을 해야 하나요?" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
+                <div><label class="block text-sm font-bold text-slate-700 mb-2">알림 시간 (매일)</label><input type="time" id="alarm-time-input" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xl font-bold text-center outline-none focus:ring-2 focus:ring-blue-500"></div>
+                <div><label class="block text-sm font-bold text-slate-700 mb-2">알림 이름</label><input type="text" id="alarm-title-input" placeholder="약 먹기, 물 마시기 등" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"></div>
             </div>
-            <button id="save-alarm-btn" class="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold p-4 rounded-xl transition shadow-md">알림 저장</button>
+            <button id="save-alarm-btn" class="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold p-4 rounded-xl transition shadow-md">저장</button>
         </div>
     </div>
 
-    <!-- 알람 발생 시 띄워주는 경고 모달 (새로 추가됨) -->
+    <!-- 알람 발생 모달 -->
     <div id="alarm-trigger-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex justify-center items-center">
         <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-8 text-center animate-slide-up">
             <div class="w-20 h-20 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-ring shadow-lg shadow-amber-500/30">
@@ -195,9 +190,8 @@
             </div>
             <h2 class="text-2xl font-black text-slate-800 mb-2">알림 시간이에요!</h2>
             <p id="alarm-trigger-title" class="text-lg text-blue-600 font-bold mb-8">혈압 약 먹을 시간</p>
-            
             <button id="dismiss-alarm-btn" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold p-4 rounded-xl transition">
-                확인했습니다
+                알림 끄기
             </button>
         </div>
     </div>
