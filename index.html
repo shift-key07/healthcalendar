@@ -8,7 +8,6 @@
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // 다크모드 깜빡임 방지용 초기 로드 스크립트
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
         } else {
@@ -16,7 +15,7 @@
         }
 
         tailwind.config = {
-            darkMode: 'class', // 다크모드 활성화
+            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: { sans: ['Pretendard', 'sans-serif'] },
@@ -79,7 +78,6 @@
 
             <div class="flex-1 overflow-y-auto p-4 md:p-10 pb-24 md:pb-10 relative">
                 
-                <!-- 로그인 화면 -->
                 <div id="auth-section" class="flex flex-col h-full justify-center items-center py-10">
                     <div class="w-full max-w-sm">
                         <div class="text-center mb-10"><div class="inline-flex items-center justify-center w-20 h-20 rounded-[1.5rem] bg-gradient-to-tr from-blue-500 to-indigo-600 text-white mb-6 shadow-lg transform rotate-3"><i data-lucide="heart-pulse" class="w-10 h-10"></i></div><h1 class="text-3xl font-extrabold text-slate-800 dark:text-white">건강 다이어리</h1></div>
@@ -121,8 +119,12 @@
                             </div>
                             
                             <div class="glass-card p-6 rounded-3xl shadow-sm">
-                                <div class="flex justify-between items-center mb-6">
-                                    <h3 class="font-bold text-slate-800 dark:text-white text-lg flex items-center gap-2"><i data-lucide="bar-chart-2" class="w-5 h-5 text-blue-500"></i> 주간 건강 통계</h3>
+                                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                                    <h3 class="font-bold text-slate-800 dark:text-white text-lg flex items-center gap-2">
+                                        <i data-lucide="bar-chart-2" class="w-5 h-5 text-blue-500"></i> 주간 건강 통계 
+                                        <!-- 주간 범위 텍스트 추가 -->
+                                        <span id="chart-date-range" class="text-sm font-normal text-slate-500 dark:text-slate-400 ml-1"></span>
+                                    </h3>
                                     <div class="flex gap-2 text-sm bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                                         <button id="chart-tab-steps" class="chart-tab active bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm px-3 py-1.5 rounded-lg font-bold transition">걸음수</button>
                                         <button id="chart-tab-bp" class="chart-tab text-slate-500 dark:text-slate-400 px-3 py-1.5 rounded-lg font-bold transition">혈압</button>
@@ -204,7 +206,6 @@
             <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">건강 수치와 오늘의 일기를 남겨보세요.</p>
             
             <div class="space-y-5">
-                <!-- 1. 건강 수치 기록 -->
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1"><i data-lucide="activity" class="w-4 h-4 text-rose-500"></i> 혈압</label><input type="text" id="record-bp" placeholder="120/80" class="w-full p-3 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none"></div>
                     <div><label class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1"><i data-lucide="footprints" class="w-4 h-4 text-emerald-500"></i> 걸음수</label><input type="number" id="record-steps" placeholder="8000" class="w-full p-3 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none"></div>
@@ -212,16 +213,21 @@
                 <div><label class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1"><i data-lucide="droplet" class="w-4 h-4 text-blue-500"></i> 수분 섭취 (잔)</label><input type="number" id="record-water" min="0" value="0" class="w-full p-3 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none"></div>
                 <div class="flex items-center justify-between p-4 border border-slate-200 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-700/50"><div class="flex items-center gap-2"><i data-lucide="pill" class="w-5 h-5 text-amber-500"></i><span class="font-bold text-slate-700 dark:text-slate-200">약 복용 완료</span></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="record-meds" class="sr-only peer"><div class="w-11 h-6 bg-slate-300 dark:bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div></label></div>
                 
-                <!-- 2. 일기 쓰기 영역 (강조됨) -->
+                <!-- 메모와 일기 분리됨 -->
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1"><i data-lucide="align-left" class="w-4 h-4 text-slate-500"></i> 간단한 메모</label>
+                    <input type="text" id="record-notes" placeholder="간단한 증상이나 특이사항..." class="w-full p-3 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none">
+                </div>
                 <div class="pt-2">
                     <label class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1"><i data-lucide="book-open" class="w-4 h-4 text-purple-500"></i> 오늘의 일기</label>
-                    <textarea id="record-notes" rows="4" placeholder="오늘 하루는 어땠나요? 컨디션이나 기분을 자유롭게 적어보세요." class="w-full p-4 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none resize-none focus:ring-2 focus:ring-purple-500"></textarea>
+                    <textarea id="record-diary" rows="4" placeholder="오늘 하루는 어땠나요? 기분이나 감정을 일기로 남겨보세요." class="w-full p-4 bg-slate-50 dark:bg-slate-700 dark:text-white border border-slate-200 dark:border-slate-600 rounded-xl outline-none resize-none focus:ring-2 focus:ring-purple-500"></textarea>
                 </div>
             </div>
             <button id="save-record-btn" class="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold p-4 rounded-xl transition">저장하기</button>
         </div>
     </div>
 
+    <!-- 알람 설정 모달들 (동일) -->
     <div id="add-alarm-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex justify-center items-center">
         <div class="bg-white dark:bg-slate-800 w-full max-w-sm rounded-3xl shadow-2xl p-6 animate-slide-up relative">
             <button id="close-alarm-modal-btn" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white p-2"><i data-lucide="x" class="w-6 h-6"></i></button>
@@ -234,17 +240,12 @@
         </div>
     </div>
 
-    <!-- 알람 발생 모달 -->
     <div id="alarm-trigger-modal" class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex justify-center items-center">
         <div class="bg-white dark:bg-slate-800 w-full max-w-sm rounded-3xl shadow-2xl p-8 text-center animate-slide-up">
-            <div class="w-20 h-20 bg-amber-100 dark:bg-amber-900/50 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-ring shadow-lg shadow-amber-500/30">
-                <i data-lucide="bell-ring" class="w-10 h-10"></i>
-            </div>
+            <div class="w-20 h-20 bg-amber-100 dark:bg-amber-900/50 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-ring shadow-lg shadow-amber-500/30"><i data-lucide="bell-ring" class="w-10 h-10"></i></div>
             <h2 class="text-2xl font-black text-slate-800 dark:text-white mb-2">알림 시간이에요!</h2>
             <p id="alarm-trigger-title" class="text-lg text-blue-600 dark:text-blue-400 font-bold mb-8">혈압 약 먹을 시간</p>
-            <button id="dismiss-alarm-btn" class="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-bold p-4 rounded-xl transition">
-                알림 끄기
-            </button>
+            <button id="dismiss-alarm-btn" class="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-bold p-4 rounded-xl transition">알림 끄기</button>
         </div>
     </div>
 
